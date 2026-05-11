@@ -3,13 +3,13 @@ from pathlib import Path
 
 
 class SQLDatabase:
-    def __init(self, path="data/aristotle.db"):
+    def __init__(self, path="data/aristotle.db"):
         source = Path(path)
         if source.is_file():
             self.conn = sqlite3.connect(path)
         else:
             self.conn = self.init_db(path)
-        
+        self.cursor = self.conn.cursor()
 
     @staticmethod
     def init_db(path: str):
@@ -36,10 +36,10 @@ class SQLDatabase:
         # ---- TOPIC RELATIONS (graph edges) ----
         c.execute("""
         CREATE TABLE IF NOT EXISTS topic_edges (
-            parent TEXT,
-            child TEXT,
+            topic1 TEXT,
+            topic2 TEXT,
             relation_type TEXT, -- prerequisite | related | subtopic
-            PRIMARY KEY (parent, child, relation_type)
+            PRIMARY KEY (topic1, topic2, relation_type)
         )
         """)
 
@@ -79,11 +79,39 @@ class SQLDatabase:
         conn.commit()
         return conn
 
+    ### Addition
 
-    def add_user(sel, user_id: str):
-        
+    def add_user(self, user_id: str):
+        self.cursor.execute("INSERT INTO users (id, created_at) VALUES (?, datetime('now'))", (user_id,))
+        self.conn.commit()
+
+    ### Retrieval
+
+    def get_topic_graph(self):
+        edges = self.cursor.execute("SELECT topic1, topic2, relation_type FROM topic_edges")
+        nodes = self.cursor.execute("SELECT id, name FROM topics")
+        self.cursor.fetchall()
+        graph = self._gen_graph(nodes, edges)
+        return graph
+    
+    @staticmethod
+    def _gen_graph(nodes, edges):
+        graph = {node[0]: {"name": node[1], "edges": []} for node in nodes}
+        for parent, child, relation in edges:
+            graph[parent]["edges"].append((child, relation))
+        return graph
+
+
+
+def gen_dummy_data():
+    db = SQLDatabase()
+    # Populate topics and edge with dummy data related to inductance
+    db.cursor.execute("INSERT INTO topics (id, name, description) VALUES ('inductance', 'Inductance', 'The property of a conductor by which a change in current induces an electromotive force.')")
+    db.cursor.execute("INSERT INTO topics (id, name, description) VALUES ('spin', 'Spin', 'An intrinsic form of angular momentum carried by elementary particles.')")
+    db.cursor.execute("INSERT INTO topic_edges (topic1, topic2, relation_type) VALUES ('spin', 'inductance', 'prerequisite')")
+    db.conn.commit() 
 
 
 
 if __name__ == "__main__":
-    SQLDatabase()
+    gen_dummy_data()
