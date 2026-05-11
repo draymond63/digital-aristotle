@@ -11,4 +11,5 @@ authors = [{name = "Dan", email = "dan@example.com"}]
 dependencies = [
     "ollama",
     "chromadb",
+    "pysqlite3",
 ]

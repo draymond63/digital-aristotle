@@ -55,10 +55,14 @@ You must teach incrementally, check understanding, and adapt depth dynamically.
   - misconceptions
   - explanation fragments
   - analogies
-- SQL/yaml
-  - what has happened
+- SQL
+  - chronology
   - model knowledge of topics and their relations
+  - mastery history over time (not just current value)
+  - lesson outcomes (what improved, what failed)
+- yaml
   - distilled state of user skill
   - current lesson plans
+  - user preferences
 
 - Version controlled data with AI controlled git repo
