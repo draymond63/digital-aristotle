@@ -1,0 +1,25 @@
+domains:
+  control_theory:
+    level: advanced_undergrad
+
+  dsp:
+    level: strong
+
+  topology:
+    level: beginner
+
+preferences:
+  explanation_style:
+    - geometric
+    - systems-level
+    - intuition_before_formalism
+
+  dislikes:
+    - excessive notation
+    - repetitive basics
+
+interests:
+  - estimation
+  - dynamical_systems
+  - embedded_systems
+  - computational_linguistics
