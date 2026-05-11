@@ -5,8 +5,8 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "ai-teacher"
 version = "0.1.0"
-description = "A simple AI teacher project"
-authors = [{name = "Dan", email = "dan@example.com"}]
+description = "A Digital Aristotle"
+authors = [{name = "Dan", email = "dan@raymond.ch"}]
 
 dependencies = [
     "ollama",

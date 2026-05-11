@@ -87,19 +87,15 @@ class SQLDatabase:
 
     ### Retrieval
 
-    def get_topic_graph(self):
-        edges = self.cursor.execute("SELECT topic1, topic2, relation_type FROM topic_edges")
-        nodes = self.cursor.execute("SELECT id, name FROM topics")
-        self.cursor.fetchall()
-        graph = self._gen_graph(nodes, edges)
-        return graph
-    
-    @staticmethod
-    def _gen_graph(nodes, edges):
-        graph = {node[0]: {"name": node[1], "edges": []} for node in nodes}
-        for parent, child, relation in edges:
-            graph[parent]["edges"].append((child, relation))
-        return graph
+    def get_related_topics(self, topic_names: list[str]):
+        placeholders = ','.join('?' for _ in topic_names)
+        query = f"""
+        SELECT topic2, relation_type FROM topic_edges
+        WHERE topic1 IN ({placeholders})
+        OR topic2 IN ({placeholders})
+        """
+        self.cursor.execute(query, topic_names)
+        return self.cursor.fetchall()
 
 
 

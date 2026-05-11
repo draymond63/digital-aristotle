@@ -1,12 +1,21 @@
 domains:
   control_theory:
-    level: advanced_undergrad
+    intuition: 0.8
+    details: 0.3
+    confidence: 0.5
+    last_updated: 2026-05-11
 
   dsp:
-    level: strong
+    intuition: 0.8
+    details: 0.3
+    confidence: 0.5
+    last_updated: 2026-05-11
 
   topology:
-    level: beginner
+    intuition: 0.8
+    details: 0.3
+    confidence: 0.5
+    last_updated: 2026-05-11
 
 preferences:
   explanation_style:
