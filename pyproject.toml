@@ -12,4 +12,6 @@ dependencies = [
     "ollama",
     "chromadb",
     "pysqlite3",
+    "transformers", # For tokenization
+    "python-telegram-bot",
 ]

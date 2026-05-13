@@ -1,5 +1,13 @@
 https://chatgpt.com/c/6a00ce1f-c71c-83ea-9d8a-86696484883c
 
+# TODO
+- User evaluation
+- Insight/confusion distillation
+- Topic edge creation
+- Telegram integration
+- Saving chats before they are finished
+
+
 # Flow
 ## Possible Entrypoints/Tasks
 1. Continue off of previous lessons

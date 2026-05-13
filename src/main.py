@@ -6,7 +6,7 @@ from agent import Agent
 from db_sql import SQLDatabase
 from db_vector import SemanticDatabase, Collection
 from profile import Profile
-from prompts import SYSTEM_PROMPT
+from prompts import *
 
 
 # ============================================================
@@ -51,8 +51,9 @@ class LessonPlanRequest:
 class Aristotle:
 
     def __init__(self, user="daniel"):
-        self.llm = Agent()
+        self.user = user
 
+        self.llm = Agent()
         self.vector_db = SemanticDatabase()
         self.sql_db = SQLDatabase()
         self.profile = Profile.load_user(user)
@@ -72,14 +73,19 @@ class Aristotle:
         """
         One-off question answering path.
         """
-        topics = self.llm.identify_topics(question)
+        session_id = self.sql_db.log_session_start(user_id=self.user, message=question)
+        self.vector_db.log_ask(question, session_id=session_id)
+        topics = self.identify_topics(question)
+        # Upload topics
+        self.sql_db.connect_topic_to_session(session_id=session_id, topics=topics)
 
         prompt = self._build_question_prompt(
             question=question,
             topics=topics,
         )
 
-        response = self.llm.generate(prompt)
+        print("Generated prompt for question:\n", prompt)
+
 
         # self._post_interaction_update(
         #     user_input=question,
@@ -87,7 +93,7 @@ class Aristotle:
         #     topic=topics,
         # )
 
-        return response
+        self.converse(prompt, question)
 
     def suggest_topic(self):
         ...
@@ -105,12 +111,39 @@ class Aristotle:
         """
         ...
 
+
+    def converse(self, system: str, user: str):
+        """
+        Open-ended conversation.
+        """
+        messages = [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ]
+        
+        while user != "":
+            response = self.llm.generate(messages)
+            print(response.message.content)
+            messages.append({"role": "assistant", "content": response.message.content})
+            user = input("\nUser: ")
+            print()
+            messages.append({"role": "user", "content": user})
+            # TODO: Add evaluation and feedback loop here
+
     # ========================================================
     # INTERNALS
     # ========================================================
 
+    def identify_topics(self, msg: str, threshold=0.5) -> list[str]:
+        related_asks = self.vector_db.find_asks(query=msg)
+        topics = self.sql_db.get_topics_from_related_asks(user_id=self.user, related_asks=related_asks)
+        print("Retrieved topics from related asks:", topics)
+        if not len(topics):
+            topics = self.llm.identify_topics(msg=msg, threshold=threshold)
+            print("Identified topics from LLM:", topics)
+        return topics
 
-    def _build_question_prompt(self, question: str, topics: list) -> list[dict[str, str]]:
+    def _build_question_prompt(self, question: str, topics: list) -> str:
         """
         Build in order, to optimize KV cache
         [
@@ -123,21 +156,27 @@ class Aristotle:
         ]
         """
         insights = self.vector_db.query(
-            collection_name=Collection.insight,
+            collection_name=Collection.INSIGHTS,
             query_texts=[question, f"topics: {topics}"],
             n_results=5,
         )
-        related_topics = self.sql_db.get_related_topics(topics)
+        related_topics = self.sql_db.get_related_topics_pretty(topics)
 
-        prompt = SYSTEM_PROMPT + "\n\n"
+        prompt = TEACHER_PROMPT + "\n\n"
+        # TODO: Filter user profile to relevant domains
         prompt += f"User profile:\n{self.profile}\n\n"
-        prompt += f"Retrieved insights:\n{insights}\n\n"
-        prompt += f"Related topics:\n{related_topics}\n\n"
+        if len(insights):
+            prompt += f"insights the user has had:\n{self._pretty_vector_response(insights)}\n\n"
+        if len(related_topics):
+            prompt += f"Related topics:\n{related_topics}\n\n"
 
-        return [
-            {"role": "system", "content": prompt},
-            {"role": "user", "content": question},
-        ]
+        return prompt
+    
+    def _pretty_vector_response(self, response):
+        pretty = []
+        for doc, dist in zip(response["documents"][0], response["distances"][0]):
+            pretty.append(f"{doc} (dist: {dist:3f})")
+        return "\n".join(pretty)
 
     def _evaluate_understanding(self, topic: str, response: str):
         prompt = {
@@ -187,4 +226,5 @@ class Aristotle:
 
 
 if __name__ == "__main__":
-    Aristotle().ask_question("How is inductance derived from spin?")
+    response = Aristotle().ask_question("What at the atomic level causes inductance?")
+    print(response)
