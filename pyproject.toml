@@ -13,5 +13,10 @@ dependencies = [
     "chromadb",
     "pysqlite3",
     "transformers", # For tokenization
+    "dotenv",
+
+    # Interface
     "python-telegram-bot",
+    # "gtts",
+    # "openai-whisper",
 ]

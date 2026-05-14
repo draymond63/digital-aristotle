@@ -1,6 +1,7 @@
 https://chatgpt.com/c/6a00ce1f-c71c-83ea-9d8a-86696484883c
 
 # TODO
+- Handle different users from telegram
 - User evaluation
 - Insight/confusion distillation
 - Topic edge creation

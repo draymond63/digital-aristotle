@@ -2,11 +2,11 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
 
-from agent import Agent
-from db_sql import SQLDatabase
-from db_vector import SemanticDatabase, Collection
-from profile import Profile
-from prompts import *
+from brains.agent import Agent
+from brains.db_sql import SQLDatabase
+from brains.db_vector import SemanticDatabase, Collection
+from brains.profile import Profile
+from brains.prompts import *
 
 
 # ============================================================
@@ -58,6 +58,9 @@ class Aristotle:
         self.sql_db = SQLDatabase()
         self.profile = Profile.load_user(user)
 
+        # TODO: Improve message handling
+        self.messages = []
+
         # self.curriculum_engine = curriculum_engine
         # self.memory_engine = (memory_engine)
         # self.topic_graph = topic_graph
@@ -73,6 +76,18 @@ class Aristotle:
         """
         One-off question answering path.
         """
+        prompt = self.init_question(question)
+
+
+        # self._post_interaction_update(
+        #     user_input=question,
+        #     response=response,
+        #     topic=topics,
+        # )
+
+        self.converse(prompt, question)
+
+    def init_question(self, question: str) -> str:
         session_id = self.sql_db.log_session_start(user_id=self.user, message=question)
         self.vector_db.log_ask(question, session_id=session_id)
         topics = self.identify_topics(question)
@@ -85,15 +100,7 @@ class Aristotle:
         )
 
         print("Generated prompt for question:\n", prompt)
-
-
-        # self._post_interaction_update(
-        #     user_input=question,
-        #     response=response,
-        #     topic=topics,
-        # )
-
-        self.converse(prompt, question)
+        return prompt
 
     def suggest_topic(self):
         ...
@@ -120,7 +127,7 @@ class Aristotle:
             {"role": "system", "content": system},
             {"role": "user", "content": user},
         ]
-        
+
         while user != "":
             response = self.llm.generate(messages)
             print(response.message.content)

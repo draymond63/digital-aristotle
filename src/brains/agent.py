@@ -5,24 +5,25 @@ from ollama import chat, ChatResponse
 from transformers import AutoTokenizer
 from datetime import datetime
 
-from prompts import TOPIC_ID_PROMPT
+from brains.prompts import TOPIC_ID_PROMPT
 
 
 class Agent:
     def __init__(self, max_tokens=4096):
         self.model = 'qwen2.5:3b-instruct-q4_K_M'
-        self.tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-3B-Instruct", trust_remote_code=True)
-        self.max_tokens = max_tokens
+        # self.tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-3B-Instruct", trust_remote_code=True)
+        # self.max_tokens = max_tokens
 
 
     def ask(self, system: str="", user: str="", **kwargs) -> str:
         return self.generate([{'role': 'system', 'content': system}, {'role': 'user', 'content': user}], **kwargs)
 
     def generate(self, messages: list[dict[str, str]], temperature=0.7) -> ChatResponse:
+        print("Generating response for messages:\n", messages)
         discussion = "\n".join([msg['content'] for msg in messages])
-        tokens = self.tokenizer.encode(discussion)
-        if len(tokens) > self.max_tokens:
-            print(f"Warning: input tokens ({len(tokens)}) exceed max_tokens ({self.max_tokens}). Consider truncating the input.")
+        # tokens = self.tokenizer.encode(discussion)
+        # if len(tokens) > self.max_tokens:
+        #     print(f"Warning: input tokens ({len(tokens)}) exceed max_tokens ({self.max_tokens}). Consider truncating the input.")
 
         return chat(
             model=self.model,
@@ -40,7 +41,7 @@ class Agent:
 
 
 if __name__ == "__main__":
-    from prompts import TOPIC_ID_PROMPT
+    from brains.prompts import TOPIC_ID_PROMPT
     agent = Agent()
     startTime = datetime.now()
     response = agent.ask(system=TOPIC_ID_PROMPT,user="How is macroscopic inductance derived from the B field?", temperature=0.0)
