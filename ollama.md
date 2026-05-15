@@ -14,3 +14,11 @@ curl http://localhost:11434/api/generate -d '{
   "model": "qwen3.5:9b",
   "prompt": "Say hello in one sentence"
 }'
+
+
+models
+- phi4-mini:3.8b-q4_K_M
+- qwen2.5:3b-instruct-q4_K_M
+
+models to avoid
+- qwen3.5:4b (to big)

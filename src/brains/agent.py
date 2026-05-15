@@ -2,7 +2,8 @@
 
 import json
 from ollama import chat, ChatResponse
-from transformers import AutoTokenizer
+from ollama import AsyncClient
+# from transformers import AutoTokenizer
 from datetime import datetime
 
 from brains.prompts import TOPIC_ID_PROMPT
@@ -10,7 +11,9 @@ from brains.prompts import TOPIC_ID_PROMPT
 
 class Agent:
     def __init__(self, max_tokens=4096):
-        self.model = 'qwen2.5:3b-instruct-q4_K_M'
+        # self.model = 'qwen2.5:3b-instruct-q4_K_M'
+        self.model = 'phi4-mini:3.8b-q4_K_M'
+        self.client = AsyncClient()
         # self.tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-3B-Instruct", trust_remote_code=True)
         # self.max_tokens = max_tokens
 
@@ -18,14 +21,28 @@ class Agent:
     def ask(self, system: str="", user: str="", **kwargs) -> str:
         return self.generate([{'role': 'system', 'content': system}, {'role': 'user', 'content': user}], **kwargs)
 
-    def generate(self, messages: list[dict[str, str]], temperature=0.7) -> ChatResponse:
-        print("Generating response for messages:\n", messages)
-        discussion = "\n".join([msg['content'] for msg in messages])
+    def generate(self, messages: list[dict[str, str]], temperature=0.7, **kwargs) -> ChatResponse:
+        # print("Generating response for messages:\n", messages, end="\n\n")
+        # discussion = "\n".join([msg['content'] for msg in messages])
         # tokens = self.tokenizer.encode(discussion)
         # if len(tokens) > self.max_tokens:
         #     print(f"Warning: input tokens ({len(tokens)}) exceed max_tokens ({self.max_tokens}). Consider truncating the input.")
 
         return chat(
+            model=self.model,
+            messages=messages,
+            options={'temperature': temperature},
+            **kwargs
+        )
+    
+    async def generate_async(self, messages: list[dict[str, str]], temperature=0.7) -> ChatResponse:
+        print("Generating response for messages:\n", messages, end="\n\n")
+        # discussion = "\n".join([msg['content'] for msg in messages])
+        # tokens = self.tokenizer.encode(discussion)
+        # if len(tokens) > self.max_tokens:
+        #     print(f"Warning: input tokens ({len(tokens)}) exceed max_tokens ({self.max_tokens}). Consider truncating the input.")
+
+        return await self.client.chat(
             model=self.model,
             messages=messages,
             options={'temperature': temperature}
