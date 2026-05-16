@@ -1,8 +1,7 @@
 import json
 from dataclasses import dataclass
 from enum import StrEnum
-from pyexpat.errors import messages
-from typing import Literal
+from typing import Literal, Generator
 
 from brains.agent import Agent
 from brains.prompts import *
@@ -62,12 +61,13 @@ class ConversationBrain:
     def num_messages(self):
         return len(self._messages)
 
-    def respond(self, user_message: str) -> EvaluationResult:
-        self.evaluate_user_message(user_message)        
+    def respond(self, user_message: str) -> Generator[str, None, None]:
+        self.evaluate_user_message(user_message)       
         # # Response to user
-        response = self.get_loop_response("teacher")
-        self.append_message("assistant", response)
-        return EvaluationResult(response=response)
+        response = self.get_loop_response("teacher", stream=True)
+        for message in response:
+            self.append_message("assistant", message)
+            yield message
 
     def evaluate_user_message(self, user_message: str):
         self.append_message("user", user_message)
@@ -103,15 +103,18 @@ class ConversationBrain:
         self._messages.append({"role": role, "content": content})
         print(f"{role}: {content}\n")
 
-    def get_loop_response(self, loop_name: str, as_json: bool = False, **kwargs) -> str | object:
+    def get_loop_response(self, loop_name: str, as_json: bool = False, stream=False, **kwargs) -> str | object | Generator[str, None, None]:
         loop = self.LOOPS[loop_name]
         conversation = self.get_conversation(loop_name)
-        format = "json" if as_json else ""
-        response = self.llm.generate(conversation, temperature=loop.temperature, format=format, **kwargs)
-        content = response.message.content
-        if as_json:
-            return json.loads(content)
-        return content
+        if stream:
+            assert not as_json, f"Cannot get json whil streaming output"
+            return self.llm.generate_chunks(conversation, temperature=loop.temperature, **kwargs)
+        else:
+            format = "json" if as_json else ""
+            content = self.llm.generate(conversation, temperature=loop.temperature, format=format, **kwargs)
+            if as_json:
+                return json.loads(content)
+            return content
 
     def get_conversation(self, loop_name: str) -> list[dict[str, str]]:
         system_prompt = self.LOOPS[loop_name].prompt
@@ -152,8 +155,11 @@ def test_evaluator():
 
     for i in user_indices:
         agent.set_messages(conversation[:i-1])
-        response = agent.respond(conversation[i]["content"])
-        print(response)
+        responses = agent.respond(conversation[i]["content"])
+        import time
+        time.sleep(5)
+        for r in responses:
+            print(r)
 
 
 

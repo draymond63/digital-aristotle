@@ -137,7 +137,7 @@ class Aristotle:
         Open-ended conversation.
         """
         while message != "":
-            self.brain.respond(message)
+            list(self.brain.respond(message))
             message = input("\nUser: ")
 
     # ========================================================

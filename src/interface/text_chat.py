@@ -46,8 +46,10 @@ class TextBot:
             prompt = self.agent.build_relevant_user_info(user_text)
             self.agent.brain.append_message("system", prompt)
 
-        response = self.agent.brain.respond(user_text)
-        await update.message.reply_text(response.response)
+        responses = self.agent.brain.respond(user_text)
+        for response in responses:
+            print(response)
+            await update.message.reply_text(response)
 
     def respond(self, text: str) -> str:
         print(f"Received user input: {text}")
