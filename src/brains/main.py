@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
 
-from brains.agent import Agent
+from brains.brain_loops import ConversationBrain
 from brains.db_sql import SQLDatabase
 from brains.db_vector import SemanticDatabase, Collection
 from brains.profile import Profile
@@ -53,7 +53,7 @@ class Aristotle:
     def __init__(self, user="daniel"):
         self.user = user
 
-        self.llm = Agent()
+        self.brain = ConversationBrain()
         self.vector_db = SemanticDatabase()
         self.sql_db = SQLDatabase()
         self.profile = Profile.load_user(user)
@@ -65,9 +65,17 @@ class Aristotle:
         # self.memory_engine = (memory_engine)
         # self.topic_graph = topic_graph
 
+    def save(self):
+        import json
+        from datetime import datetime
+        filename = datetime.now().isoformat(timespec="seconds").replace(":", "-")
+        with open(f"data/conversations/{filename}.json", "w+") as f:
+            print(self.brain._messages)
+            json.dump(self.brain._messages, f)
+
     # ========================================================
     # ENTRY POINTS
-    # ========================================================
+    # ========================================================        
 
     def continue_lesson(self, request: LessonRequest):
         ...
@@ -76,30 +84,42 @@ class Aristotle:
         """
         One-off question answering path.
         """
-        prompt = self.init_question(question)
+        prompt = self.build_relevant_user_info(question)
+        self.brain.append_message("system", prompt)
+        self.converse(question)
 
-
-        # self._post_interaction_update(
-        #     user_input=question,
-        #     response=response,
-        #     topic=topics,
-        # )
-
-        self.converse(prompt, question)
-
-    def init_question(self, question: str) -> str:
+    def build_relevant_user_info(self, question: str) -> str:
+        """
+        Build in order, to optimize KV cache
+        [
+            static_system,
+            persistent_user_model,
+            retrieved_memories,
+            current_lesson_state,
+            recent_conversation,
+            current_user_message
+        ]
+        """
         session_id = self.sql_db.log_session_start(user_id=self.user, message=question)
         self.vector_db.log_ask(question, session_id=session_id)
         topics = self.identify_topics(question)
         # Upload topics
         self.sql_db.connect_topic_to_session(session_id=session_id, topics=topics)
 
-        prompt = self._build_question_prompt(
-            question=question,
-            topics=topics,
+        insights = self.vector_db.query(
+            collection_name=Collection.INSIGHTS,
+            query_texts=[question, f"topics: {topics}"],
+            n_results=5,
         )
+        related_topics = self.sql_db.get_related_topics_pretty(topics)
 
-        print("Generated prompt for question:\n", prompt)
+        # TODO: Filter user profile to relevant domains
+        prompt = f"User profile:\n{self.profile}\n\n"
+        if len(insights):
+            prompt += f"insights the user has had:\n{self._pretty_vector_response(insights)}\n\n"
+        if len(related_topics):
+            prompt += f"Related topics:\n{related_topics}\n\n"
+        # print("Generated prompt for question:\n", prompt)
         return prompt
 
     def suggest_topic(self):
@@ -112,30 +132,13 @@ class Aristotle:
     # LESSON LOOP
     # ========================================================
 
-    def submit_lesson_response(self, topic: str, user_response: str):
-        """
-        Closed-loop tutoring update.
-        """
-        ...
-
-
-    def converse(self, system: str, user: str):
+    def converse(self, message: str):
         """
         Open-ended conversation.
         """
-        messages = [
-            {"role": "system", "content": system},
-            {"role": "user", "content": user},
-        ]
-
-        while user != "":
-            response = self.llm.generate(messages)
-            print(response.message.content)
-            messages.append({"role": "assistant", "content": response.message.content})
-            user = input("\nUser: ")
-            print()
-            messages.append({"role": "user", "content": user})
-            # TODO: Add evaluation and feedback loop here
+        while message != "":
+            self.brain.evaluate_user_message(message)
+            message = input("\nUser: ")
 
     # ========================================================
     # INTERNALS
@@ -146,38 +149,9 @@ class Aristotle:
         topics = self.sql_db.get_topics_from_related_asks(user_id=self.user, related_asks=related_asks)
         print("Retrieved topics from related asks:", topics)
         if not len(topics):
-            topics = self.llm.identify_topics(msg=msg, threshold=threshold)
+            topics = self.brain.llm.identify_topics(msg=msg, threshold=threshold)
             print("Identified topics from LLM:", topics)
         return topics
-
-    def _build_question_prompt(self, question: str, topics: list) -> str:
-        """
-        Build in order, to optimize KV cache
-        [
-            static_system,
-            persistent_user_model,
-            retrieved_memories,
-            current_lesson_state,
-            recent_conversation,
-            current_user_message
-        ]
-        """
-        insights = self.vector_db.query(
-            collection_name=Collection.INSIGHTS,
-            query_texts=[question, f"topics: {topics}"],
-            n_results=5,
-        )
-        related_topics = self.sql_db.get_related_topics_pretty(topics)
-
-        prompt = TEACHER_PROMPT + "\n\n"
-        # TODO: Filter user profile to relevant domains
-        prompt += f"User profile:\n{self.profile}\n\n"
-        if len(insights):
-            prompt += f"insights the user has had:\n{self._pretty_vector_response(insights)}\n\n"
-        if len(related_topics):
-            prompt += f"Related topics:\n{related_topics}\n\n"
-
-        return prompt
     
     def _pretty_vector_response(self, response):
         pretty = []
@@ -185,53 +159,11 @@ class Aristotle:
             pretty.append(f"{doc} (dist: {dist:3f})")
         return "\n".join(pretty)
 
-    def _evaluate_understanding(self, topic: str, response: str):
-        prompt = {
-            "task": "evaluate_understanding",
-            "topic": topic,
-            "response": response,
-        }
-
-        return self.llm.generate(prompt)
-
-    def _update_mastery(self, topic: str, evaluation):
-        self.profile.update_domain(
-            topic,
-            evaluation,
-        )
-
-        self.sql_db.log_mastery_event(
-            topic,
-            evaluation,
-        )
-
-    def _decide_next_teaching_action(self, evaluation):
-        if evaluation["understanding"] < 0.4:
-            return "clarify"
-
-        if evaluation["understanding"] < 0.7:
-            return "probe_deeper"
-
-        return "advance"
-
-    def _post_interaction_update(self, user_input: str, response: str, topic: str):
-
-        memories = self.memory_engine.extract(
-            user_input=user_input,
-            response=response,
-            topic=topic,
-        )
-
-        self.memory_engine.store(memories)
-
-        self.sql_db.log_event(
-            topic=topic,
-            content=user_input,
-        )
 
 
 
 
 if __name__ == "__main__":
-    response = Aristotle().ask_question("What at the atomic level causes inductance?")
-    print(response)
+    ctrl = Aristotle()
+    ctrl.ask_question("why do some materials have higher permeability than others? What's happening at the atomic level?")
+    ctrl.save()
