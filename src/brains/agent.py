@@ -44,11 +44,17 @@ class Agent:
 
     def identify_topics(self, msg: str, threshold=0.5) -> list[str]:
         response = self.ask(system=TOPIC_ID_PROMPT, user=msg, format="json", temperature=0.0)
-        json_response = json.loads(response.message.content)
-        if isinstance(json_response, list):
-            topics = [item["name"] for item in json_response if item["confidence"] > threshold]
-        elif isinstance(json_response, dict):
-            topics = [json_response["name"]]
+        try:
+            json_response = json.loads(response.message.content)
+            if not len(json_response):
+                print("Warning: no topics identified")
+                return []
+            if isinstance(json_response, list):
+                topics = [item["name"] for item in json_response if item["confidence"] > threshold]
+            elif isinstance(json_response, dict):
+                topics = [json_response["name"]]
+        except Exception as e:
+            raise RuntimeError(f"Failed to decode: {response.message.content}") from e
         return topics
 
 

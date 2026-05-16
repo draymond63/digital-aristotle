@@ -18,8 +18,6 @@ class TextBot:
 
         self.token = token
         self.agent = Aristotle()
-        self.num_messages = 0
-        self.messages = []
 
         self.app = ApplicationBuilder().token(self.token).build()
         self.app.add_handler(CommandHandler("start", self.start))
@@ -31,8 +29,8 @@ class TextBot:
         await update.message.reply_text("Ready.")
 
     async def wipe_conversation(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        self.num_messages = 0
-        self.messages = []
+        self.agent.save()
+        self.agent.brain.set_messages([])
         await update.message.reply_text("Conversation history cleared.")
 
     async def handle_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -44,16 +42,12 @@ class TextBot:
 
         print(f"Received message from {user} ({user_id}): {user_text}")
 
-        if self.num_messages == 0:
-            prompt = self.agent.init_question(user_text)
-            self.messages.append({"role": "system", "content": prompt})
+        if self.agent.brain.num_messages == 0:
+            prompt = self.agent.build_relevant_user_info(user_text)
+            self.agent.brain.append_message("system", prompt)
 
-        self.messages.append({"role": "user", "content": user_text})
-        response = self.agent.llm.generate(self.messages)
-        self.messages.append({"role": "assistant", "content": response.message.content})
-        self.num_messages += 1
-
-        await update.message.reply_text(response.message.content)
+        response = self.agent.brain.respond(user_text)
+        await update.message.reply_text(response.response)
 
     def respond(self, text: str) -> str:
         print(f"Received user input: {text}")

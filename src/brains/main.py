@@ -106,7 +106,7 @@ class Aristotle:
         # Upload topics
         self.sql_db.connect_topic_to_session(session_id=session_id, topics=topics)
 
-        insights = self.vector_db.query(
+        insights = self.vector_db.query_pretty(
             collection_name=Collection.INSIGHTS,
             query_texts=[question, f"topics: {topics}"],
             n_results=5,
@@ -116,7 +116,7 @@ class Aristotle:
         # TODO: Filter user profile to relevant domains
         prompt = f"User profile:\n{self.profile}\n\n"
         if len(insights):
-            prompt += f"insights the user has had:\n{self._pretty_vector_response(insights)}\n\n"
+            prompt += f"insights the user has had:\n{insights}\n\n"
         if len(related_topics):
             prompt += f"Related topics:\n{related_topics}\n\n"
         # print("Generated prompt for question:\n", prompt)
@@ -137,7 +137,7 @@ class Aristotle:
         Open-ended conversation.
         """
         while message != "":
-            self.brain.evaluate_user_message(message)
+            self.brain.respond(message)
             message = input("\nUser: ")
 
     # ========================================================
@@ -152,18 +152,11 @@ class Aristotle:
             topics = self.brain.llm.identify_topics(msg=msg, threshold=threshold)
             print("Identified topics from LLM:", topics)
         return topics
-    
-    def _pretty_vector_response(self, response):
-        pretty = []
-        for doc, dist in zip(response["documents"][0], response["distances"][0]):
-            pretty.append(f"{doc} (dist: {dist:3f})")
-        return "\n".join(pretty)
-
-
 
 
 
 if __name__ == "__main__":
     ctrl = Aristotle()
-    ctrl.ask_question("why do some materials have higher permeability than others? What's happening at the atomic level?")
+    # ctrl.ask_question("why do some materials have higher permeability than others? What's happening at the atomic level?")
+    ctrl.ask_question("How does a kalman filter work?")
     ctrl.save()

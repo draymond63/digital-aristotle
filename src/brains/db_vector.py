@@ -1,6 +1,5 @@
-from chromadb import PersistentClient, QueryResult
+from chromadb import PersistentClient
 from enum import StrEnum
-from datetime import datetime
 
 
 class Collection(StrEnum):
@@ -33,10 +32,20 @@ class SemanticDatabase:
         collection = self.collection(collection_name)
         collection.upsert(ids=ids, documents=documents)
 
+    def query_pretty(self, *args, max_dist=0.8, **kwargs):
+        response = self.query(*args, **kwargs)
+        pretty = []
+        results = [(doc, dist) for doc, dist in zip(response["documents"][0], response["distances"][0]) if dist <= max_dist]
+        if not len(results):
+            return ""
+        for doc, dist in results:
+            pretty.append(f"{doc} (dist: {dist:3f})")
+        return "\n".join(pretty)
+
     def query(self, collection_name: Collection, query_texts: list[str], **kwargs):
         collection = self.collection(collection_name)
         results = collection.query(query_texts=query_texts, **kwargs)
-        return QueryResult(results)
+        return results
 
     def collection(self, collection_name: Collection):
         return self.client.get_or_create_collection(name=collection_name.value)
