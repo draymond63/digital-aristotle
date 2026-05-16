@@ -3,8 +3,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Literal, Generator
 
-from brains.agent import Agent
-from brains.prompts import *
+from brains.model_api import Agent
+from brains.prompts_converser import *
 
 
 

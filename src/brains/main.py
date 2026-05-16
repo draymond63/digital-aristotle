@@ -2,11 +2,11 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
 
-from brains.brain_loops import ConversationBrain
+from brains.converser import ConversationBrain
 from brains.db_sql import SQLDatabase
 from brains.db_vector import SemanticDatabase, Collection
 from brains.profile import Profile
-from brains.prompts import *
+from brains.prompts_system import TOPIC_ID_PROMPT
 
 
 # ============================================================

@@ -7,7 +7,7 @@ from ollama import Client, AsyncClient
 # from transformers import AutoTokenizer
 from datetime import datetime
 
-from brains.prompts import TOPIC_ID_PROMPT
+from brains.prompts_system import TOPIC_ID_PROMPT
 
 
 class Agent:
@@ -79,7 +79,7 @@ class Agent:
 
 
 if __name__ == "__main__":
-    from brains.prompts import TOPIC_ID_PROMPT
+    from brains.prompts_system import TOPIC_ID_PROMPT
     agent = Agent()
     startTime = datetime.now()
     response = agent.generate_chunks([{"role": "user", "content": "How is macroscopic inductance derived from the B field?"}], temperature=0.0)
