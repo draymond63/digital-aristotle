@@ -1,9 +1,7 @@
 import json
-from dataclasses import dataclass
 from enum import StrEnum
-from typing import Literal, Generator
 
-from brains.model_api import Agent
+from brains.brain import Brain, CognitiveLoop, EvalLoop
 from brains.prompts_converser import *
 
 
@@ -23,51 +21,24 @@ class LessonState(StrEnum):
     FIX = "fix"
     ADVANCE = "advance"
 
+
 STATE_ENTRY_PROMPTS = {
     LessonState.EVALUATE: "Ask the user a question to evaluate the their understanding"
 }
 
 
-@dataclass
-class EvaluationResult:
-    response: str
-    # TODO: Insights, misconceptions, etc.
-
-
-@dataclass
-class LoopDefinition:
-    prompt: str
-    temperature: float = 0.5
-
-
-class ConversationBrain:
+class ConversationBrain(Brain):
     LOOPS = {
-        "teacher": LoopDefinition(TEACHER_PROMPT),
-        "state-evaluator": LoopDefinition(EVALUATION_PROMPT, 0.0),
-        "distillation": LoopDefinition(INSIGHT_EXTRACTION_PROMPT),
+        "teacher": CognitiveLoop(TEACHER_PROMPT),
+        "state-evaluator": EvalLoop(EVALUATION_PROMPT, temperature=0.0),
+        "distillation": CognitiveLoop(INSIGHT_EXTRACTION_PROMPT),
         # TODO: Lesson planning loop
     }
+    OUTPUT_LOOP = "teacher"
 
     def __init__(self, messages=[]):
-        self.llm = Agent()
+        super().__init__(self.LOOPS, self.OUTPUT_LOOP, messages)
         self.state = LessonState.TEACH
-        self._messages: list[dict[str, str]] = []
-        self.set_messages(messages)
-
-    def set_messages(self, messages: list[dict[str, str]]):
-        self._messages = self._clean_messages(messages)
-
-    @property
-    def num_messages(self):
-        return len(self._messages)
-
-    def respond(self, user_message: str) -> Generator[str, None, None]:
-        self.evaluate_user_message(user_message)       
-        # # Response to user
-        response = self.get_loop_response("teacher", stream=True)
-        for message in response:
-            self.append_message("assistant", message)
-            yield message
 
     def evaluate_user_message(self, user_message: str):
         self.append_message("user", user_message)
@@ -98,52 +69,6 @@ class ConversationBrain:
             self.state = new_state
             prompt = STATE_ENTRY_PROMPTS.get(new_state, "")
             self.append_message("system", f"Entering {new_state} mode. Reason: {state_response['evidence']}. {prompt}")
-
-    def append_message(self, role: Literal["system", "assistant", "user"], content: str):
-        self._messages.append({"role": role, "content": content})
-        print(f"{role}: {content}\n")
-
-    def get_loop_response(self, loop_name: str, as_json: bool = False, stream=False, **kwargs) -> str | object | Generator[str, None, None]:
-        loop = self.LOOPS[loop_name]
-        conversation = self.get_conversation(loop_name)
-        if stream:
-            assert not as_json, f"Cannot get json whil streaming output"
-            return self.llm.generate_chunks(conversation, temperature=loop.temperature, **kwargs)
-        else:
-            format = "json" if as_json else ""
-            content = self.llm.generate(conversation, temperature=loop.temperature, format=format, **kwargs)
-            if as_json:
-                return json.loads(content)
-            return content
-
-    def get_conversation(self, loop_name: str) -> list[dict[str, str]]:
-        system_prompt = self.LOOPS[loop_name].prompt
-        match loop_name:
-            case "state-evaluator":
-                messages = [{"role": "user", "content": self.get_transcript()}]
-            case _:
-                messages = self._messages.copy()
-        messages.insert(0, {"role": "system", "content": system_prompt})
-        return messages
-
-    def get_transcript(self, last: int = None) -> list[dict[str, str]]:
-        transcript = "BEGIN TRANSCRIPT\n"
-        # TODO: Should we let the loop see it's previous system messages?
-        clean_messages = self._clean_messages(self._messages)
-        if last:
-            clean_messages = clean_messages[-last:]
-        
-        for message in clean_messages:
-            role = message['role'].upper()
-            content = message['content']
-            transcript += f"{role}: {content}\n\n"
-        transcript += "END TRANSCRIPT"
-        return transcript
-    
-    @staticmethod
-    def _clean_messages(messages):
-        return [m for m in messages if m["role"] != "system"]
-
 
 
 def test_evaluator():
