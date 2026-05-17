@@ -1,10 +1,7 @@
-import json
 from enum import StrEnum
 
-from brains.brain import Brain, CognitiveLoop, EvalLoop
-from brains.prompts_converser import *
-
-
+from brains.comms.agent_base import Brain, TaskedAgent, EvalAgent, Conversation
+from brains.comms.prompts_converser import *
 
 
 class LessonState(StrEnum):
@@ -28,22 +25,22 @@ STATE_ENTRY_PROMPTS = {
 
 
 class ConversationBrain(Brain):
-    LOOPS = {
-        "teacher": CognitiveLoop(TEACHER_PROMPT),
-        "state-evaluator": EvalLoop(EVALUATION_PROMPT, temperature=0.0),
-        "distillation": CognitiveLoop(INSIGHT_EXTRACTION_PROMPT),
-        # TODO: Lesson planning loop
-    }
-    OUTPUT_LOOP = "teacher"
-
-    def __init__(self, messages=[]):
-        super().__init__(self.LOOPS, self.OUTPUT_LOOP, messages)
+    def __post_init__(self):
+        self.teacher = TaskedAgent("assistant", TEACHER_PROMPT)
+        self.state_eval = EvalAgent("state-eval", EVALUATION_PROMPT, temperature=0.0)
+        self.distiller = TaskedAgent("distiller", INSIGHT_EXTRACTION_PROMPT)
         self.state = LessonState.TEACH
 
+    def respond(self, user_message: str):
+        self.evaluate_user_message(user_message)       
+        for message in self.teacher.stream_response(self.convo):
+            self.convo.append(message)
+            yield message
+
     def evaluate_user_message(self, user_message: str):
-        self.append_message("user", user_message)
+        self.add_usr_msg(user_message)
         # Evaluate what we should do next based on the user's message and the current state of the lesson
-        state_response = self.get_loop_response("state-evaluator", as_json=True)
+        state_response = self.state_eval.get_json(self.convo)
         self.update_state(state_response)
         return state_response
 
@@ -68,23 +65,22 @@ class ConversationBrain(Brain):
             print("Updating state:", new_state)
             self.state = new_state
             prompt = STATE_ENTRY_PROMPTS.get(new_state, "")
-            self.append_message("system", f"Entering {new_state} mode. Reason: {state_response['evidence']}. {prompt}")
+            message = f"Entering {new_state} mode. Reason: {state_response['evidence']}. {prompt}"
+            self.convo.append(self.state_eval.wrap_msg(message))
 
 
 def test_evaluator():
-    with open("data/conversations/kalman.json", "r", encoding="utf-8") as f:
-        conversation = json.load(f)[1:]
-
+    conversation = Conversation.load_api_format("data/conversations/kalman.json")
     agent = ConversationBrain()
-    user_indices = [i for i, m in enumerate(conversation) if m["role"] == "user"]
+    user_indices = [i for i, m in enumerate(conversation) if m.role == "user"]
 
     for i in user_indices:
-        agent.set_messages(conversation[:i-1])
-        responses = agent.respond(conversation[i]["content"])
-        import time
-        time.sleep(5)
-        for r in responses:
-            print(r)
+        agent.set_convo(conversation[:i-1])
+        state_eval = agent.evaluate_user_message(conversation[i].content)
+        print(state_eval)
+        # for r in responses:
+        #     print(r.content)
+        # agent.save()
 
 
 

@@ -30,7 +30,7 @@ class TextBot:
 
     async def wipe_conversation(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         self.agent.save()
-        self.agent.brain.set_messages([])
+        self.agent.brain.set_convo([])
         await update.message.reply_text("Conversation history cleared.")
 
     async def handle_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE):

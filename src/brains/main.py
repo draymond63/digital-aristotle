@@ -2,11 +2,11 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
 
-from brains.converser import ConversationBrain
-from brains.db_sql import SQLDatabase
-from brains.db_vector import SemanticDatabase, Collection
-from brains.profile import Profile
-from brains.prompts_system import TOPIC_ID_PROMPT
+from brains.comms.converser import ConversationBrain
+from brains.data.db_sql import SQLDatabase
+from brains.data.db_vector import SemanticDatabase, Collection
+from brains.data.profile import Profile
+from brains.comms.prompts_system import TOPIC_ID_PROMPT
 
 
 # ============================================================
@@ -66,12 +66,7 @@ class Aristotle:
         # self.topic_graph = topic_graph
 
     def save(self):
-        import json
-        from datetime import datetime
-        filename = datetime.now().isoformat(timespec="seconds").replace(":", "-")
-        with open(f"data/conversations/{filename}.json", "w+") as f:
-            print(self.brain._messages)
-            json.dump(self.brain._messages, f)
+        self.brain.save()
 
     # ========================================================
     # ENTRY POINTS
