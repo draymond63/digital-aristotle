@@ -223,6 +223,14 @@ class Brain(ABC):
     def respond(self, user_message: str) -> Generator[str, None, None]:
         pass
 
+    def chat_local(self):
+        while True:
+            message = input("\nUser: ")
+            if message == "":
+                break
+            list(self.respond(message))
+        self.save()
+
     def add_usr_msg(self, user_message):
         self.convo.append(user_message, "user")
 

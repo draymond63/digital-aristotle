@@ -1,4 +1,4 @@
-from brains.comms.agent_base import Brain, TaskedAgent, EvalAgent
+from brains.comms.agent_base import Brain, TaskedAgent
 from brains.comms.prompts_onboarder import *
 
 
@@ -56,7 +56,8 @@ class OnboardingBrain(Brain):
         self.curr_dim += 1
         dimension, meaning = self.current_dimension
         self.wipe()
-        self.convo.append(self.evaluator.wrap_msg(f"Understand user's {meaning}"))
+        prompt = ASSESSMENT_TRANSITION_PROMPT(dimension, meaning)
+        self.convo.append(self.evaluator.wrap_msg(prompt))
 
     # TODO: Middle to evaluate end of conversation, or get the tester to emit hidden state at the bottom
 
@@ -64,11 +65,11 @@ class OnboardingBrain(Brain):
 
 
 if __name__ == "__main__":
+    from brains.comms.agent_base import Conversation
     brain = OnboardingBrain()
-    list(brain.start())
-    while True:
-        message = input("\nUser: ")
-        if message == "":
-            break
-        list(brain.respond(message))
-    brain.save()
+    # list(brain.start())
+    convo = Conversation.load("data\conversations\onboarding-1.json")[:-2]
+    brain.set_convo(convo)
+    brain.next_section()
+    list(brain._get_response())
+    brain.chat_local()

@@ -94,3 +94,11 @@ Schema:
 - Use canonical technical terminology
 - Return valid JSON only
 """
+
+
+def ASSESSMENT_TRANSITION_PROMPT(topic: str, explanation: str):
+  return f"""Current topic: {topic}.
+
+Ask one follow-up question probing {explanation}.
+Do not answer on behalf of the user.
+Keep the conversation natural and concise."""
