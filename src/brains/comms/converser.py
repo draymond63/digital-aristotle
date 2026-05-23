@@ -30,6 +30,7 @@ class ConversationBrain(Brain):
         self.state_eval = EvalAgent("state-eval", EVALUATION_PROMPT, temperature=0.0)
         self.distiller = TaskedAgent("distiller", INSIGHT_EXTRACTION_PROMPT)
         self.state = LessonState.TEACH
+        self.state_transition_confidence_threshold = 0.75
 
     def respond(self, user_message: str):
         self.evaluate_user_message(user_message)       
@@ -50,15 +51,15 @@ class ConversationBrain(Brain):
         new_state = None
         match self.state:
             case LessonState.TEACH:
-                if understanding > 0.6 and confidence > 0.75:
+                if understanding > 0.6 and confidence > self.state_transition_confidence_threshold:
                     new_state = LessonState.EVALUATE
             case LessonState.EVALUATE:
-                if understanding > 0.8 and confidence > 0.75:
+                if understanding > 0.8 and confidence > self.state_transition_confidence_threshold:
                     new_state = LessonState.ADVANCE
                 else:
                     new_state = LessonState.FIX
             case LessonState.FIX:
-                if understanding > 0.8 and confidence > 0.75:
+                if understanding > 0.8 and confidence > self.state_transition_confidence_threshold:
                     new_state = LessonState.ADVANCE
 
         if new_state is not None:

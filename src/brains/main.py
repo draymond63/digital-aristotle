@@ -3,10 +3,11 @@ from enum import Enum
 from typing import Optional
 
 from brains.comms.converser import ConversationBrain
+from brains.comms.agent_base import EvalAgent
+from brains.comms.prompts_system import *
 from brains.data.db_sql import SQLDatabase
 from brains.data.db_vector import SemanticDatabase, Collection
 from brains.data.profile import Profile
-from brains.comms.prompts_system import TOPIC_ID_PROMPT
 
 
 # ============================================================
@@ -54,6 +55,7 @@ class Aristotle:
         self.user = user
 
         self.brain = ConversationBrain()
+        self.topic_id_agent = EvalAgent("topic-id", TOPIC_ID_PROMPT, temperature=0.0)
         self.vector_db = SemanticDatabase()
         self.sql_db = SQLDatabase()
         self.profile = Profile.load_user(user)
@@ -80,7 +82,7 @@ class Aristotle:
         One-off question answering path.
         """
         prompt = self.build_relevant_user_info(question)
-        self.brain.append_message("system", prompt)
+        self.brain.convo.append(prompt, "system")
         self.converse(question)
 
     def build_relevant_user_info(self, question: str) -> str:
@@ -140,12 +142,23 @@ class Aristotle:
     # ========================================================
 
     def identify_topics(self, msg: str, threshold=0.5) -> list[str]:
-        related_asks = self.vector_db.find_asks(query=msg)
+        related_asks = self.vector_db.find_asks(query=msg, max_dist=threshold)
         topics = self.sql_db.get_topics_from_related_asks(user_id=self.user, related_asks=related_asks)
         print("Retrieved topics from related asks:", topics)
         if not len(topics):
-            topics = self.brain.llm.identify_topics(msg=msg, threshold=threshold)
+            topics = self._agent_id_topics(msg, threshold)
             print("Identified topics from LLM:", topics)
+        return topics
+
+    def _agent_id_topics(self, msg: str, threshold: float) -> list[str]:
+        json_response = self.topic_id_agent.get_json(self.brain.convo)
+        if not len(json_response):
+            print("Warning: no topics identified")
+            return []
+        if isinstance(json_response, list):
+            topics = [item["name"] for item in json_response if item["confidence"] > threshold]
+        elif isinstance(json_response, dict):
+            topics = [json_response["name"]]
         return topics
 
 

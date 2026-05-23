@@ -31,7 +31,7 @@ class Message:
     @property
     def in_transcript(self):
         return self.source in ROLES
-    
+
     @property
     def role(self) -> RoleType:
         if self.source in ROLES:
@@ -73,6 +73,9 @@ class Conversation:
     def in_transcript(self):
         return self.filter(lambda m: m.in_transcript)
 
+    def with_agents(self, agents: list[str]):
+        return self.filter(lambda m: m.in_transcript or m.source in agents)
+
     def filter(self, keep: Callable[[Message], bool]):
         return Conversation([m for m in self._messages if keep(m)])
 
@@ -109,11 +112,13 @@ class Agent:
         self.client = Client()
         # self.tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-3B-Instruct", trust_remote_code=True)
         # self.max_tokens = max_tokens
-        
 
     def get_json(self, *args, **kwargs) -> dict | list:
         response = self.get_response(*args, format="json", **kwargs)
-        return json.loads(response.content)
+        try:
+            return json.loads(response.content)
+        except Exception as e:
+            raise RuntimeError(f"Failed to decode: {response}") from e
 
     def get_response(self, *args, **kwargs) -> Message:
         response = self._generate(*args, **kwargs)
@@ -156,22 +161,6 @@ class Agent:
         if buffer.strip():
             yield buffer.strip()
 
-    # TODO: Move elsewhere
-    def identify_topics(self, msg: str, threshold=0.5) -> list[str]:
-        response = self.ask(system=TOPIC_ID_PROMPT, user=msg, format="json", temperature=0.0)
-        try:
-            json_response = json.loads(response)
-            if not len(json_response):
-                print("Warning: no topics identified")
-                return []
-            if isinstance(json_response, list):
-                topics = [item["name"] for item in json_response if item["confidence"] > threshold]
-            elif isinstance(json_response, dict):
-                topics = [json_response["name"]]
-        except Exception as e:
-            raise RuntimeError(f"Failed to decode: {response}") from e
-        return topics
-
 
 @dataclass
 class TaskedAgent(Agent):
@@ -207,7 +196,7 @@ class EvalAgent(TaskedAgent):
 
     def get_transcript(self, messages: Conversation, last: int = None) -> Conversation:
         # TODO: Should we let the loop see it's previous system messages?
-        clean_messages = messages.in_transcript()
+        clean_messages = messages.in_transcript() # messages.with_agents([self.name])
         if last:
             clean_messages = clean_messages[-last:]
 
