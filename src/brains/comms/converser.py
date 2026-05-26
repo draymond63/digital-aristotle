@@ -1,18 +1,10 @@
 from enum import StrEnum
 
-from brains.comms.agent_base import Brain, TaskedAgent, EvalAgent, Conversation
+from brains.comms.agent_base import Brain, Task
 from brains.comms.prompts_converser import *
 
 
 class LessonState(StrEnum):
-    """State Machine
-
-    TEACH -> TEACH, EVALUATE
-    EVALUATE -> FIX, ADVANCE
-    FIX -> FIX, EVALUATE
-    ADVANCE -> TEACH
-    """
-
     TEACH = "teach"
     EVALUATE = "evaluate"
     FIX = "fix"
@@ -20,81 +12,65 @@ class LessonState(StrEnum):
 
 
 STATE_ENTRY_PROMPTS = {
-    LessonState.EVALUATE: "Ask the user a question to evaluate the their understanding"
+    LessonState.EVALUATE: "Ask the user a question to evaluate their understanding."
 }
 
 
 class ConversationBrain(Brain):
     def __post_init__(self):
-        self.teacher = TaskedAgent("assistant", TEACHER_PROMPT)
-        self.state_eval = EvalAgent("state-eval", EVALUATION_PROMPT, temperature=0.0)
-        self.distiller = TaskedAgent("distiller", INSIGHT_EXTRACTION_PROMPT)
+        self.teacher_task = Task("teacher", TEACHER_PROMPT, visible_history=12, temperature=0.5)
+        self.state_eval_task = Task(
+            "state_eval",
+            EVALUATION_PROMPT,
+            context_format="transcript",
+            visible_history=12,
+            output_format="json",
+            temperature=0.0,
+        )
+        self.distill_task = Task(
+            "insight_distiller",
+            INSIGHT_EXTRACTION_PROMPT,
+            context_format="transcript",
+            visible_history=20,
+            output_format="json",
+            temperature=0.5,
+        )
         self.state = LessonState.TEACH
+        self.state_prompt = ""
         self.state_transition_confidence_threshold = 0.75
 
     def respond(self, user_message: str):
-        self.evaluate_user_message(user_message)       
-        for message in self.teacher.stream_response(self.convo):
-            self.convo.append(message)
-            yield message
+        self.evaluate_user_message(user_message)
+        dynamic_prompts = [self.state_prompt] if self.state_prompt else []
+        yield from self.stream_task(self.teacher_task, dynamic_prompts=dynamic_prompts)
 
     def evaluate_user_message(self, user_message: str):
         self.add_usr_msg(user_message)
-        # Evaluate what we should do next based on the user's message and the current state of the lesson
-        state_response = self.state_eval.get_json(self.convo)
+        state_response = self.run_task_json(self.state_eval_task)
         self.update_state(state_response)
         return state_response
 
     def update_state(self, state_response: dict):
         print(state_response)
-        understanding, confidence = state_response["understanding"], state_response["confidence"]
+        understanding = state_response["understanding"]
+        confidence = state_response["confidence"]
         new_state = None
+
         match self.state:
             case LessonState.TEACH:
                 if understanding > 0.6 and confidence > self.state_transition_confidence_threshold:
                     new_state = LessonState.EVALUATE
             case LessonState.EVALUATE:
-                if understanding > 0.8 and confidence > self.state_transition_confidence_threshold:
-                    new_state = LessonState.ADVANCE
-                else:
-                    new_state = LessonState.FIX
+                new_state = LessonState.ADVANCE if understanding > 0.8 else LessonState.FIX
             case LessonState.FIX:
                 if understanding > 0.8 and confidence > self.state_transition_confidence_threshold:
                     new_state = LessonState.ADVANCE
 
         if new_state is not None:
-            print("Updating state:", new_state)
-            self.state = new_state
-            prompt = STATE_ENTRY_PROMPTS.get(new_state, "")
-            message = f"Entering {new_state} mode. Reason: {state_response['evidence']}. {prompt}"
-            self.convo.append(self.state_eval.wrap_msg(message))
+            self.transition_to(new_state, state_response)
 
-
-def test_evaluator():
-    conversation = Conversation.load_api_format("data/conversations/kalman.json")
-    agent = ConversationBrain()
-    user_indices = [i for i, m in enumerate(conversation) if m.role == "user"]
-
-    for i in user_indices:
-        agent.set_convo(conversation[:i-1])
-        state_eval = agent.evaluate_user_message(conversation[i].content)
-        print(state_eval)
-        # for r in responses:
-        #     print(r.content)
-        # agent.save()
-
-
-
-if __name__ == "__main__":
-    test_evaluator()
-
-    # conversation = [
-    #     {"role": "user", "content": "I'm not sure I get how magnetic materials work and how they explain permeability"},
-    #     {"role": "assistant", "content": "Let's start by considering a simple model to understand magnetic fields and materials. Imagine you have a bar magnet, like a compass needle or a small iron nail that has been magnetized.\n\nMagnetic materials are substances (like iron, nickel, cobalt) that can be magnetized because their atomic structures allow them to align in such a way as to create an overall magnetic field. This alignment is due to the presence of unpaired electrons in the atoms of these materials, which have a preferred orientation within the material.\n\nNow, let's introduce the concept of permeability. Permeability (μ) is a measure of how easily a material can be magnetized and how much it will react when placed in a magnetic field. It’s often described as a property that affects the strength of the magnetic flux through a material.\n\nFor an ideal conductor or vacuum, the permeability is constant and given by the permeability of free space (μ₀), which is approximately \\(4\\pi \\times 10^{-7} \\) Tesla meters per ampere (\\(Tm/A\\)).\n\nIn real materials, however, there are tiny defects like impurities in the material structure or grain boundaries where different regions have slightly varying magnetic properties. These materials do not align perfectly and thus do not allow magnetic fields to penetrate as freely as a perfect vacuum would.\n\nWhen you place a magnet near a magnetic material, it can create a magnetic field that interacts with the atomic dipoles within the material. The strength of this interaction depends on the material’s permeability. Materials like iron are ferromagnetic and have high permeability, meaning they allow magnetic fields to penetrate more easily than diamagnetic materials (which are repelled by magnets) or paramagnetic materials (which are attracted but not strongly).\n\nTo build a deeper understanding, consider an experiment: place a piece of iron in the vicinity of another magnet. The iron will become magnetized and align its atomic dipoles with those of the external magnetic field. This phenomenon is crucial for applications like electromagnets used in motors, generators, and transformers.\n\nIf you need to delve into more complex aspects or specific examples, please let me know!"},
-    # ]
-
-    # agent = ConversationBrain(messages=conversation)
-    # with open("data/conversations/induction.json", "r", encoding="utf-8") as f:
-    #     conversation = json.load(f)[1:]
-    # response = agent.respond("But why do some materials have higher permeability than others? What's happening at the atomic level?")
-    # print(response)
+    def transition_to(self, new_state: LessonState, state_response: dict):
+        print("Updating state:", new_state)
+        self.state = new_state
+        prompt = STATE_ENTRY_PROMPTS.get(new_state, "")
+        self.state_prompt = f"Current mode: {new_state}. Reason: {state_response['evidence']}. {prompt}"

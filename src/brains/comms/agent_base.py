@@ -1,150 +1,222 @@
-# C:\Users\dan\AppData\Local\Programs\Ollama\ollama.exe pull qwen3.5:9b
-
 import json
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, asdict
-from enum import StrEnum
-from typing import Generator, Callable, Optional, Literal, get_args
+from dataclasses import dataclass, asdict, field
+from typing import Generator, Literal, get_args
 from ollama import ChatResponse
-from ollama import Client, AsyncClient
-# from transformers import AutoTokenizer
+from ollama import Client
 from datetime import datetime
-
-from brains.comms.prompts_system import TOPIC_ID_PROMPT
 
 
 RoleType = Literal["user", "system", "assistant"]
 ROLES = get_args(RoleType)
+ContextFormat = Literal["messages", "transcript", "packet"]
+OutputFormat = Literal["text", "json"]
+
+
+@dataclass(frozen=True)
+class Task:
+    name: str
+    static_prompt: str
+    context_format: ContextFormat = "messages"
+    visible_history: int | None = None
+    dynamic_after_context: bool = False
+    output_format: OutputFormat = "text"
+    temperature: float = 0.5
 
 
 @dataclass
-class Message:
+class LogEntry:
+    role: RoleType
     content: str
-    source: str | RoleType
+    task_name: str | None = None
+    visible: bool = True
+    dynamic_prompts: list[str] = field(default_factory=list)
+    input_messages: list[dict[str, str]] = field(default_factory=list)
+
+    @property
+    def source(self) -> str:
+        return self.task_name or self.role
 
     def json(self, full=False):
+        if not full and not self.task_name and self.visible and not self.dynamic_prompts and not self.input_messages:
+            return {"content": self.content, "source": self.role}
         return asdict(self)
 
     def to_api(self):
         return {"role": self.role, "content": self.content}
 
-    @property
-    def in_transcript(self):
-        return self.source in ROLES
-
-    @property
-    def role(self) -> RoleType:
-        if self.source in ROLES:
-            return self.source
-        return "system"
-
 
 class Conversation:
-    def __init__(self, messages: list[Message] = []):
-        assert isinstance(messages, list), f"Expected list[Message], received {type(messages)}"
-        self._messages: list[Message] = messages
+    def __init__(self, entries: list[LogEntry] = []):
+        assert isinstance(entries, list), f"Expected list[LogEntry], received {type(entries)}"
+        self._entries = entries
 
     def save(self, filename: str):
         with open(f"data/conversations/{filename}.json", "w+", encoding="utf-8") as f:
-            json.dump(self.json(), f)
+            json.dump(self.json(full=True), f)
 
     @classmethod
-    def load(self, filepath: str):
+    def load(cls, filepath: str):
         with open(filepath, "r", encoding="utf-8") as f:
-            messages = json.load(f)
-        return Conversation([Message(**m) for m in messages])
+            entries = json.load(f)
+        return Conversation([cls._load_entry(entry) for entry in entries])
 
-    @classmethod
-    def load_api_format(self, filepath: str):
-        with open(filepath, "r", encoding="utf-8") as f:
-            messages = json.load(f)
-        return Conversation([Message(m["content"], m["role"]) for m in messages])
+    @staticmethod
+    def _load_entry(entry: dict):
+        if "role" in entry:
+            return LogEntry(**entry)
+        source = entry["source"]
+        role = source if source in ROLES else "system"
+        task_name = None if source in ROLES else source
+        visible = source in ("user", "assistant")
+        return LogEntry(role=role, content=entry["content"], task_name=task_name, visible=visible)
 
-    def append(self, content: str | Message, source: Optional[str] = None):
-        if isinstance(content, Message):
-            msg = content
-            assert source is None
-        else:
-            assert content and source
-            msg = Message(content, source)
-        print(msg)
-        self._messages.append(msg)
+    def append_user(self, content: str):
+        self.append_entry(LogEntry(role="user", content=content))
 
-    def in_transcript(self):
-        return self.filter(lambda m: m.in_transcript)
+    def append_task_result(
+        self,
+        task: Task,
+        content: str,
+        role: RoleType = "assistant",
+        visible: bool = True,
+        dynamic_prompts: list[str] | None = None,
+        input_messages: list[dict[str, str]] | None = None,
+    ):
+        self.append_entry(LogEntry(
+            role=role,
+            content=content,
+            task_name=task.name,
+            visible=visible,
+            dynamic_prompts=dynamic_prompts or [],
+            input_messages=input_messages or [],
+        ))
 
-    def with_agents(self, agents: list[str]):
-        return self.filter(lambda m: m.in_transcript or m.source in agents)
-
-    def filter(self, keep: Callable[[Message], bool]):
-        return Conversation([m for m in self._messages if keep(m)])
-
-    def insert(self, index: int, value: Message):
-        new_convo = self.copy()
-        new_convo._messages.insert(index, value)
-        return new_convo
+    def append_entry(self, entry: LogEntry):
+        print(entry)
+        self._entries.append(entry)
 
     def copy(self):
-        return Conversation(self._messages.copy())
+        return Conversation(self._entries.copy())
 
     def json(self, full=False):
-        return [m.json() for m in self._messages]
+        return [m.json(full=full) for m in self._entries]
     
     def to_api(self):
-        return [m.to_api() for m in self._messages]
+        return [m.to_api() for m in self._entries]
+
+    def visible_messages(self):
+        return Conversation([
+            entry for entry in self._entries
+            if entry.visible and entry.role in ("user", "assistant")
+        ])
+
+    def tail(self, count: int | None):
+        if count is None:
+            return self.copy()
+        return Conversation(self._entries[-count:])
     
     def __len__(self):
-        return len(self._messages)
+        return len(self._entries)
     
     def __iter__(self):
-        yield from self._messages
+        yield from self._entries
 
     def __getitem__(self, key):
         if isinstance(key, int):
-            return self._messages[key]
-        return Conversation(self._messages[key])
+            return self._entries[key]
+        return Conversation(self._entries[key])
 
 
 class Agent:
-    def __init__(self, model='qwen2.5:3b-instruct-q4_K_M', max_tokens=4096):
+    def __init__(self, model='qwen2.5:3b-instruct-q4_K_M'):
         self.model = model
-        # self.model = 'phi4-mini:3.8b-q4_K_M'
         self.client = Client()
-        # self.tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-3B-Instruct", trust_remote_code=True)
-        # self.max_tokens = max_tokens
 
-    def get_json(self, *args, **kwargs) -> dict | list:
-        response = self.get_response(*args, format="json", **kwargs)
+    def run_task(
+        self,
+        task: Task,
+        conversation: Conversation,
+        dynamic_prompts: list[str] | None = None,
+        packet: str | None = None,
+    ) -> str:
+        response = self._generate_task(task, conversation, dynamic_prompts, packet)
+        return response.message.content
+
+    def run_task_json(
+        self,
+        task: Task,
+        conversation: Conversation,
+        dynamic_prompts: list[str] | None = None,
+        packet: str | None = None,
+    ) -> dict | list:
+        response = self._generate_task(task, conversation, dynamic_prompts, packet, format="json")
         try:
-            return json.loads(response.content)
+            return json.loads(response.message.content)
         except Exception as e:
             raise RuntimeError(f"Failed to decode: {response}") from e
 
-    def get_response(self, *args, **kwargs) -> Message:
-        response = self._generate(*args, **kwargs)
-        return self.wrap_msg(response.message.content)
-
-    def stream_response(self,*args, **kwargs):
-        responses = self._generate(*args, stream=True, **kwargs)
+    def stream_task(
+        self,
+        task: Task,
+        conversation: Conversation,
+        dynamic_prompts: list[str] | None = None,
+        packet: str | None = None,
+    ):
+        responses = self._generate_task(task, conversation, dynamic_prompts, packet, stream=True)
         for content in self._chunk_responses(responses):
-            yield self.wrap_msg(content)
+            yield content
 
-    def _generate(self, messages: Conversation, temperature=0.7, **kwargs):
-        # print("Generating response for messages:\n", messages, end="\n\n")
-        # discussion = "\n".join([msg['content'] for msg in messages])
-        # tokens = self.tokenizer.encode(discussion)
-        # if len(tokens) > self.max_tokens:
-        #     print(f"Warning: input tokens ({len(tokens)}) exceed max_tokens ({self.max_tokens}). Consider truncating the input.")
+    def build_task_messages(
+        self,
+        task: Task,
+        conversation: Conversation,
+        dynamic_prompts: list[str] | None = None,
+        packet: str | None = None,
+    ) -> list[dict[str, str]]:
+        dynamic_prompts = dynamic_prompts or []
+        messages = [{"role": "system", "content": task.static_prompt}]
+        context = self._format_task_context(task, conversation, packet)
+
+        if not task.dynamic_after_context:
+            messages.extend({"role": "system", "content": prompt} for prompt in dynamic_prompts)
+        messages.extend(context)
+        if task.dynamic_after_context:
+            messages.extend({"role": "system", "content": prompt} for prompt in dynamic_prompts)
+
+        return messages
+
+    def _generate_task(self, task: Task, conversation: Conversation, dynamic_prompts=None, packet=None, **kwargs):
+        messages = self.build_task_messages(task, conversation, dynamic_prompts, packet)
+        return self._generate(messages, temperature=task.temperature, **kwargs)
+
+    def _format_task_context(self, task: Task, conversation: Conversation, packet: str | None):
+        visible_context = conversation.visible_messages().tail(task.visible_history)
+        if task.context_format == "messages":
+            return visible_context.to_api()
+        if task.context_format == "transcript":
+            return [{"role": "user", "content": self._build_transcript(visible_context)}]
+        if task.context_format == "packet":
+            assert packet is not None, f"Task {task.name} requires packet context"
+            return [{"role": "user", "content": packet}]
+        raise ValueError(f"Unknown context format: {task.context_format}")
+
+    @staticmethod
+    def _build_transcript(conversation: Conversation):
+        transcript = "BEGIN TRANSCRIPT\n"
+        for message in conversation:
+            transcript += f"{message.role.upper()}: {message.content}\n\n"
+        transcript += "END TRANSCRIPT"
+        return transcript
+
+    def _generate(self, messages: list[dict[str, str]], temperature=0.7, **kwargs):
         response = self.client.chat(
             model=self.model,
-            messages=messages.to_api(),
+            messages=messages,
             options={'temperature': temperature},
             **kwargs
         )
         return response
-
-    def wrap_msg(self, content: str):
-        return Message(content, "assistant")
 
     @staticmethod
     def _chunk_responses(response: Generator[ChatResponse, None, None], chunk_on="\n\n") -> Generator[str, None, None]:
@@ -162,57 +234,12 @@ class Agent:
             yield buffer.strip()
 
 
-@dataclass
-class TaskedAgent(Agent):
-    name: str | Literal["assistant"]
-    prompt: str
-    temperature: float = 0.5
-
-    def __post_init__(self):
-        super().__init__() # TODO: This is a weird pattern due to the dataclass/inheritance. Should probably fix
-        self.system_message = Message(self.prompt, "system")
-
-    def stream_response(self, messages: Conversation, **kwargs):
-        conversation = self._prep_agent_input(messages)
-        yield from super().stream_response(conversation, temperature=self.temperature, **kwargs)
-
-    def get_response(self, messages: Conversation, **kwargs):
-        conversation = self._prep_agent_input(messages)
-        content = super().get_response(conversation, temperature=self.temperature, **kwargs)
-        return content
-
-    def _prep_agent_input(self, messages: Conversation) -> Conversation:
-        return messages.insert(0, self.system_message)
-    
-    def wrap_msg(self, content: str):
-        return Message(content, source=self.name)
-
-
-@dataclass
-class EvalAgent(TaskedAgent):
-    def _prep_agent_input(self, messages):
-        transcript = self.get_transcript(messages)
-        return super()._prep_agent_input(transcript)
-
-    def get_transcript(self, messages: Conversation, last: int = None) -> Conversation:
-        # TODO: Should we let the loop see it's previous system messages?
-        clean_messages = messages.in_transcript() # messages.with_agents([self.name])
-        if last:
-            clean_messages = clean_messages[-last:]
-
-        transcript = "BEGIN TRANSCRIPT\n"
-        for message in clean_messages:
-            role = message.role.upper()
-            transcript += f"{role}: {message.content}\n\n"
-        transcript += "END TRANSCRIPT"
-        return Conversation([Message(transcript, "user")])
-
-
 
 class Brain(ABC):
-    """Class with TaskedAgents that holds the conversation and handles responses"""
+    """Base class for stateful task-driven conversation loops."""
 
     def __init__(self, messages=[]):
+        self.agent = Agent()
         self.convo = Conversation(messages)
         self.__post_init__()
     
@@ -232,7 +259,70 @@ class Brain(ABC):
         self.save()
 
     def add_usr_msg(self, user_message):
-        self.convo.append(user_message, "user")
+        self.convo.append_user(user_message)
+
+    def run_task(
+        self,
+        task: Task,
+        conversation: Conversation | None = None,
+        dynamic_prompts: list[str] | None = None,
+        packet: str | None = None,
+        visible: bool = True,
+    ) -> str:
+        conversation = conversation or self.convo
+        dynamic_prompts = dynamic_prompts or []
+        input_messages = self.agent.build_task_messages(task, conversation, dynamic_prompts, packet)
+        content = self.agent.run_task(task, conversation, dynamic_prompts, packet)
+        self.convo.append_task_result(
+            task,
+            content,
+            visible=visible,
+            dynamic_prompts=dynamic_prompts,
+            input_messages=input_messages,
+        )
+        return content
+
+    def run_task_json(
+        self,
+        task: Task,
+        conversation: Conversation | None = None,
+        dynamic_prompts: list[str] | None = None,
+        packet: str | None = None,
+        visible: bool = False,
+    ) -> dict | list:
+        conversation = conversation or self.convo
+        dynamic_prompts = dynamic_prompts or []
+        input_messages = self.agent.build_task_messages(task, conversation, dynamic_prompts, packet)
+        result = self.agent.run_task_json(task, conversation, dynamic_prompts, packet)
+        self.convo.append_task_result(
+            task,
+            json.dumps(result),
+            visible=visible,
+            dynamic_prompts=dynamic_prompts,
+            input_messages=input_messages,
+        )
+        return result
+
+    def stream_task(
+        self,
+        task: Task,
+        conversation: Conversation | None = None,
+        dynamic_prompts: list[str] | None = None,
+        packet: str | None = None,
+        visible: bool = True,
+    ):
+        conversation = conversation or self.convo
+        dynamic_prompts = dynamic_prompts or []
+        input_messages = self.agent.build_task_messages(task, conversation, dynamic_prompts, packet)
+        for content in self.agent.stream_task(task, conversation, dynamic_prompts, packet):
+            self.convo.append_task_result(
+                task,
+                content,
+                visible=visible,
+                dynamic_prompts=dynamic_prompts,
+                input_messages=input_messages,
+            )
+            yield content
 
     def save(self):
         filename = datetime.now().isoformat(timespec="seconds").replace(":", "-")
@@ -242,21 +332,8 @@ class Brain(ABC):
     def num_messages(self):
         return len(self.convo)
 
-    def wipe(self):
-        self.set_convo(Conversation())
-
     def set_convo(self, convo: Conversation):
         self.convo = convo
 
 
-if __name__ == "__main__":
-    ...
-    # from brains.prompts_system import TOPIC_ID_PROMPT
-    # agent = Agent()
-    # startTime = datetime.now()
-    # response = agent.stream_response([{"role": "user", "content": "How is macroscopic inductance derived from the B field?"}], temperature=0.0)
-    # for chunk in response:
-    #     print(chunk)
-    # endTime = datetime.now()
-    # print(f"Time taken: {endTime - startTime}")
 

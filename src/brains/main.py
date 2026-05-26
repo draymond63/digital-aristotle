@@ -3,7 +3,7 @@ from enum import Enum
 from typing import Optional
 
 from brains.comms.converser import ConversationBrain
-from brains.comms.agent_base import EvalAgent
+from brains.comms.agent_base import Agent, Conversation, Task
 from brains.comms.prompts_system import *
 from brains.data.db_sql import SQLDatabase
 from brains.data.db_vector import SemanticDatabase, Collection
@@ -55,13 +55,17 @@ class Aristotle:
         self.user = user
 
         self.brain = ConversationBrain()
-        self.topic_id_agent = EvalAgent("topic-id", TOPIC_ID_PROMPT, temperature=0.0)
+        self.agent = Agent()
+        self.topic_id_task = Task(
+            "topic_id",
+            TOPIC_ID_PROMPT,
+            context_format="packet",
+            output_format="json",
+            temperature=0.0,
+        )
         self.vector_db = SemanticDatabase()
         self.sql_db = SQLDatabase()
         self.profile = Profile.load_user(user)
-
-        # TODO: Improve message handling
-        self.messages = []
 
         # self.curriculum_engine = curriculum_engine
         # self.memory_engine = (memory_engine)
@@ -82,7 +86,7 @@ class Aristotle:
         One-off question answering path.
         """
         prompt = self.build_relevant_user_info(question)
-        self.brain.convo.append(prompt, "system")
+        self.brain.state_prompt = prompt
         self.converse(question)
 
     def build_relevant_user_info(self, question: str) -> str:
@@ -151,7 +155,7 @@ class Aristotle:
         return topics
 
     def _agent_id_topics(self, msg: str, threshold: float) -> list[str]:
-        json_response = self.topic_id_agent.get_json(self.brain.convo)
+        json_response = self.agent.run_task_json(self.topic_id_task, Conversation(), packet=msg)
         if not len(json_response):
             print("Warning: no topics identified")
             return []

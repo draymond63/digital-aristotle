@@ -10,6 +10,7 @@ from telegram.ext import (
     filters,
 )
 
+from brains.comms.agent_base import Conversation
 from brains.main import Aristotle
 
 
@@ -30,7 +31,7 @@ class TextBot:
 
     async def wipe_conversation(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         self.agent.save()
-        self.agent.brain.set_convo([])
+        self.agent.brain.set_convo(Conversation())
         await update.message.reply_text("Conversation history cleared.")
 
     async def handle_text(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -44,7 +45,7 @@ class TextBot:
 
         if self.agent.brain.num_messages == 0:
             prompt = self.agent.build_relevant_user_info(user_text)
-            self.agent.brain.append_message("system", prompt)
+            self.agent.brain.state_prompt = prompt
 
         responses = self.agent.brain.respond(user_text)
         for response in responses:
