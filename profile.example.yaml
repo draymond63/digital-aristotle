@@ -1,4 +1,4 @@
-domains:
+topics:
   control_theory:
     intuition: 0.8
     details: 0.3
@@ -32,3 +32,5 @@ interests:
   - dynamical_systems
   - embedded_systems
   - computational_linguistics
+
+current_topics: []

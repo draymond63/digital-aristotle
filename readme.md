@@ -1,3 +1,15 @@
+# Goal
+I want to be able to learn things that I'm curious about by myself. This is an
+AI tutor/guide that knows what I already understand so that it can most efficiently
+educate me on what I'm curious about. If it understands my frontier of knowledge, it
+can also teach me new things that I'm ready to learn but didn't know about.
+
+I've modelled this a graph of topics with different relations between them. The users
+"frontier of knowledge" is the collection of all the topics they know about with some
+properties to understand their abilities.
+
+
+
 https://chatgpt.com/c/6a00ce1f-c71c-83ea-9d8a-86696484883c
 
 # TODO

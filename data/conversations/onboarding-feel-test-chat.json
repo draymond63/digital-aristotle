@@ -1,0 +1,319 @@
+[
+    {
+        "role": "assistant",
+        "content": "What have you been curious about lately, even if it seems random or hard to explain?",
+        "task_name": "onboarding_question",
+        "visible": true,
+        "dynamic_prompts": [
+            "Onboarding field: curiosity_anchor\nPurpose: learn what the learner is curious about right now. Good question shape: What is something you have been curious about lately, even if it feels random, vague, or hard to explain?.\nTask: ask the user one concise question that collects this field for an exploratory-learning profile.\nUse the suggested prompt shape if it fits, but adapt to the transcript naturally.\nDo not answer for the user."
+        ],
+        "input_messages": [
+            {
+                "role": "system",
+                "content": "You are an AI-guided onboarder for an exploratory learning system.\n\nThis product is not for school assignments, quizzes, or academic assessment. It helps curious people explore topics in ways that fit how they like to learn.\n\nGoal: collect one stable learner-profile field at a time while keeping the interaction conversational.\n\nCore learner-profile fields:\n- curiosity_anchor: what the learner is curious about right now\n- starting_point: what they already know or where the exploration should begin\n- learning_texture: what kinds of explanations or activities help things click\n- desired_outcome: what would make a session feel worthwhile\n- avoid: what makes learning feel boring, frustrating, or too much like school\n\nBehavior:\n- Ask exactly one question at a time.\n- Follow the current onboarding field from the system message.\n- Prefer inviting, concrete questions over vague self-reflection.\n- Offer a few lightweight examples or option chips when helpful.\n- Use at most one contextual follow-up for the current field.\n- If the user's previous answer already contains useful signal for this field, ask a sharper clarifying question rather than repeating the obvious.\n- Keep the exchange natural, concise, and efficient.\n- Do not praise, flatter, or add enthusiasm before the question.\n\nNever:\n- answer your own question\n- speak as the user\n- quiz or test the user\n- ask the user to rate themself numerically\n- diagnose personality traits\n- make the experience feel like school\n- add motivational filler\n"
+            },
+            {
+                "role": "system",
+                "content": "Onboarding field: curiosity_anchor\nPurpose: learn what the learner is curious about right now. Good question shape: What is something you have been curious about lately, even if it feels random, vague, or hard to explain?.\nTask: ask the user one concise question that collects this field for an exploratory-learning profile.\nUse the suggested prompt shape if it fits, but adapt to the transcript naturally.\nDo not answer for the user."
+            }
+        ]
+    },
+    {
+        "role": "user",
+        "content": "I keep wondering how people make tiny games and simulations, especially the parts where simple rules create surprising behavior.",
+        "task_name": null,
+        "visible": true,
+        "dynamic_prompts": [],
+        "input_messages": []
+    },
+    {
+        "role": "assistant",
+        "content": "{\"field\": \"curiosity_anchor\", \"value\": \"...\", \"signals\": [\"random\", \"hard to explain\"], \"freeform_notes\": \"The user mentions being curious about how people make games and simulations with simple rules creating surprising outcomes.\", \"evidence\": \"I keep wondering how people make tiny games and simulations, especially the parts where simple rules create surprising behavior.\"}",
+        "task_name": "onboarding_profile_extraction",
+        "visible": false,
+        "dynamic_prompts": [
+            "Onboarding field: curiosity_anchor\nPurpose: learn what the learner is curious about right now. Good question shape: What is something you have been curious about lately, even if it feels random, vague, or hard to explain?.\nTask: ask the user one concise question that collects this field for an exploratory-learning profile.\nUse the suggested prompt shape if it fits, but adapt to the transcript naturally.\nDo not answer for the user."
+        ],
+        "input_messages": [
+            {
+                "role": "system",
+                "content": "You are a profile extraction system.\n\nAnalyze the onboarding transcript only. Do not answer the user or continue the conversation.\n\nUse the onboarding field in the transcript to decide what signal to extract. Base every claim on evidence.\n\nReturn strict JSON only:\n\n{\n  \"field\": \"curiosity_anchor | starting_point | learning_texture | desired_outcome | avoid\",\n  \"confidence\": 0.7,\n  \"value\": \"...\",\n  \"signals\": [\"...\"],\n  \"freeform_notes\": \"...\",\n  \"evidence\": \"brief transcript evidence\"\n}\n\nRules:\n- Prefer fewer high-confidence observations.\n- Preserve the user's own phrasing when it is meaningful.\n- Extract from the user's answers, not from wording in the assistant questions.\n- Never use \"...\" as a value if the user gave a real answer.\n- Do not infer personality traits or diagnose ability.\n- Do not invent prior knowledge, goals, or preferences.\n- If the signal is unclear, set confidence below 0.5 and explain what is missing in freeform_notes.\n"
+            },
+            {
+                "role": "system",
+                "content": "Onboarding field: curiosity_anchor\nPurpose: learn what the learner is curious about right now. Good question shape: What is something you have been curious about lately, even if it feels random, vague, or hard to explain?.\nTask: ask the user one concise question that collects this field for an exploratory-learning profile.\nUse the suggested prompt shape if it fits, but adapt to the transcript naturally.\nDo not answer for the user."
+            },
+            {
+                "role": "user",
+                "content": "BEGIN TRANSCRIPT\nASSISTANT: What have you been curious about lately, even if it seems random or hard to explain?\n\nUSER: I keep wondering how people make tiny games and simulations, especially the parts where simple rules create surprising behavior.\n\nEND TRANSCRIPT"
+            }
+        ]
+    },
+    {
+        "role": "assistant",
+        "content": "You've been curious about how simple rules can lead to complex behavior in games and simulations. For that topic, should we start from the basics or move a bit deeper?",
+        "task_name": "onboarding_transition",
+        "visible": true,
+        "dynamic_prompts": [
+            "Onboarding field: starting_point\nPurpose: learn what the learner already knows and where the exploration should begin. Good question shape: For that topic, should we start from brand new, the basics, something you have explored a bit, or somewhere deeper?.\nTask: ask the user one concise question that collects this field for an exploratory-learning profile.\nUse the suggested prompt shape if it fits, but adapt to the transcript naturally.\nDo not answer for the user."
+        ],
+        "input_messages": [
+            {
+                "role": "system",
+                "content": "You transition between onboarding fields.\n\nInput:\n- the completed field transcript\n- the next onboarding field\n\nOutput exactly two sentences:\n1. Briefly acknowledge the useful signal from the completed field.\n2. Ask one question for the next onboarding field.\n\nRules:\n- Ask exactly one question.\n- Do not answer for the user.\n- Do not mention internal field names.\n- Do not ask about the previous field again.\n- Use the transcript only for the closing sentence.\n- Keep it natural and concise.\n"
+            },
+            {
+                "role": "system",
+                "content": "Onboarding field: starting_point\nPurpose: learn what the learner already knows and where the exploration should begin. Good question shape: For that topic, should we start from brand new, the basics, something you have explored a bit, or somewhere deeper?.\nTask: ask the user one concise question that collects this field for an exploratory-learning profile.\nUse the suggested prompt shape if it fits, but adapt to the transcript naturally.\nDo not answer for the user."
+            },
+            {
+                "role": "user",
+                "content": "Completed field transcript:\nASSISTANT: What have you been curious about lately, even if it seems random or hard to explain?\nUSER: I keep wondering how people make tiny games and simulations, especially the parts where simple rules create surprising behavior.\n\nNext onboarding field: starting_point\nPurpose: learn what the learner already knows and where the exploration should begin. Good question shape: For that topic, should we start from brand new, the basics, something you have explored a bit, or somewhere deeper?.\nUse the transcript only to close the completed field.\nThe next question must collect the next field for an exploratory-learning profile.\nWrite exactly two sentences."
+            }
+        ]
+    },
+    {
+        "role": "user",
+        "content": "I have done a little Python, but I do not really know game loops or physics simulation yet.",
+        "task_name": null,
+        "visible": true,
+        "dynamic_prompts": [],
+        "input_messages": []
+    },
+    {
+        "role": "assistant",
+        "content": "{\"field\": \"starting_point\", \"confidence\": 0.7, \"value\": \"...\", \"signals\": [\"little Python experience\", \"no knowledge of game loops\", \"no knowledge of physics simulation\"], \"freeform_notes\": \"User mentions doing a little Python but lacks specific knowledge about game loops and physics simulation.\", \"evidence\": \"USER: I have done a little Python, but I do not really know game loops or physics simulation yet.\"}",
+        "task_name": "onboarding_profile_extraction",
+        "visible": false,
+        "dynamic_prompts": [
+            "Onboarding field: starting_point\nPurpose: learn what the learner already knows and where the exploration should begin. Good question shape: For that topic, should we start from brand new, the basics, something you have explored a bit, or somewhere deeper?.\nTask: ask the user one concise question that collects this field for an exploratory-learning profile.\nUse the suggested prompt shape if it fits, but adapt to the transcript naturally.\nDo not answer for the user."
+        ],
+        "input_messages": [
+            {
+                "role": "system",
+                "content": "You are a profile extraction system.\n\nAnalyze the onboarding transcript only. Do not answer the user or continue the conversation.\n\nUse the onboarding field in the transcript to decide what signal to extract. Base every claim on evidence.\n\nReturn strict JSON only:\n\n{\n  \"field\": \"curiosity_anchor | starting_point | learning_texture | desired_outcome | avoid\",\n  \"confidence\": 0.7,\n  \"value\": \"...\",\n  \"signals\": [\"...\"],\n  \"freeform_notes\": \"...\",\n  \"evidence\": \"brief transcript evidence\"\n}\n\nRules:\n- Prefer fewer high-confidence observations.\n- Preserve the user's own phrasing when it is meaningful.\n- Extract from the user's answers, not from wording in the assistant questions.\n- Never use \"...\" as a value if the user gave a real answer.\n- Do not infer personality traits or diagnose ability.\n- Do not invent prior knowledge, goals, or preferences.\n- If the signal is unclear, set confidence below 0.5 and explain what is missing in freeform_notes.\n"
+            },
+            {
+                "role": "system",
+                "content": "Onboarding field: starting_point\nPurpose: learn what the learner already knows and where the exploration should begin. Good question shape: For that topic, should we start from brand new, the basics, something you have explored a bit, or somewhere deeper?.\nTask: ask the user one concise question that collects this field for an exploratory-learning profile.\nUse the suggested prompt shape if it fits, but adapt to the transcript naturally.\nDo not answer for the user."
+            },
+            {
+                "role": "user",
+                "content": "BEGIN TRANSCRIPT\nASSISTANT: You've been curious about how simple rules can lead to complex behavior in games and simulations. For that topic, should we start from the basics or move a bit deeper?\n\nUSER: I have done a little Python, but I do not really know game loops or physics simulation yet.\n\nEND TRANSCRIPT"
+            }
+        ]
+    },
+    {
+        "role": "assistant",
+        "content": "When learning something new, what usually helps it click: examples, stories, visuals, analogies, hands-on projects, big-picture maps, or discussion? How do you prefer to receive information to better understand complex concepts like game loops and physics simulation?",
+        "task_name": "onboarding_transition",
+        "visible": true,
+        "dynamic_prompts": [
+            "Onboarding field: learning_texture\nPurpose: learn what kinds of explanations or activities help things click. Good question shape: When learning something new, what usually helps it click: examples, stories, visuals, analogies, hands-on projects, big-picture maps, or discussion?.\nTask: ask the user one concise question that collects this field for an exploratory-learning profile.\nUse the suggested prompt shape if it fits, but adapt to the transcript naturally.\nDo not answer for the user."
+        ],
+        "input_messages": [
+            {
+                "role": "system",
+                "content": "You transition between onboarding fields.\n\nInput:\n- the completed field transcript\n- the next onboarding field\n\nOutput exactly two sentences:\n1. Briefly acknowledge the useful signal from the completed field.\n2. Ask one question for the next onboarding field.\n\nRules:\n- Ask exactly one question.\n- Do not answer for the user.\n- Do not mention internal field names.\n- Do not ask about the previous field again.\n- Use the transcript only for the closing sentence.\n- Keep it natural and concise.\n"
+            },
+            {
+                "role": "system",
+                "content": "Onboarding field: learning_texture\nPurpose: learn what kinds of explanations or activities help things click. Good question shape: When learning something new, what usually helps it click: examples, stories, visuals, analogies, hands-on projects, big-picture maps, or discussion?.\nTask: ask the user one concise question that collects this field for an exploratory-learning profile.\nUse the suggested prompt shape if it fits, but adapt to the transcript naturally.\nDo not answer for the user."
+            },
+            {
+                "role": "user",
+                "content": "Completed field transcript:\nASSISTANT: You've been curious about how simple rules can lead to complex behavior in games and simulations. For that topic, should we start from the basics or move a bit deeper?\nUSER: I have done a little Python, but I do not really know game loops or physics simulation yet.\n\nNext onboarding field: learning_texture\nPurpose: learn what kinds of explanations or activities help things click. Good question shape: When learning something new, what usually helps it click: examples, stories, visuals, analogies, hands-on projects, big-picture maps, or discussion?.\nUse the transcript only to close the completed field.\nThe next question must collect the next field for an exploratory-learning profile.\nWrite exactly two sentences."
+            }
+        ]
+    },
+    {
+        "role": "user",
+        "content": "Examples and hands-on projects help most. I like visual explanations too.",
+        "task_name": null,
+        "visible": true,
+        "dynamic_prompts": [],
+        "input_messages": []
+    },
+    {
+        "role": "assistant",
+        "content": "{\"field\": \"learning_texture\", \"confidence\": 0.7, \"value\": \"...\", \"signals\": [\"examples\", \"hands-on projects\"], \"freeform_notes\": \"User prefers examples and hands-on projects for learning new concepts.\", \"evidence\": \"USER: Examples and hands-on projects help most. I like visual explanations too.\"}",
+        "task_name": "onboarding_profile_extraction",
+        "visible": false,
+        "dynamic_prompts": [
+            "Onboarding field: learning_texture\nPurpose: learn what kinds of explanations or activities help things click. Good question shape: When learning something new, what usually helps it click: examples, stories, visuals, analogies, hands-on projects, big-picture maps, or discussion?.\nTask: ask the user one concise question that collects this field for an exploratory-learning profile.\nUse the suggested prompt shape if it fits, but adapt to the transcript naturally.\nDo not answer for the user."
+        ],
+        "input_messages": [
+            {
+                "role": "system",
+                "content": "You are a profile extraction system.\n\nAnalyze the onboarding transcript only. Do not answer the user or continue the conversation.\n\nUse the onboarding field in the transcript to decide what signal to extract. Base every claim on evidence.\n\nReturn strict JSON only:\n\n{\n  \"field\": \"curiosity_anchor | starting_point | learning_texture | desired_outcome | avoid\",\n  \"confidence\": 0.7,\n  \"value\": \"...\",\n  \"signals\": [\"...\"],\n  \"freeform_notes\": \"...\",\n  \"evidence\": \"brief transcript evidence\"\n}\n\nRules:\n- Prefer fewer high-confidence observations.\n- Preserve the user's own phrasing when it is meaningful.\n- Extract from the user's answers, not from wording in the assistant questions.\n- Never use \"...\" as a value if the user gave a real answer.\n- Do not infer personality traits or diagnose ability.\n- Do not invent prior knowledge, goals, or preferences.\n- If the signal is unclear, set confidence below 0.5 and explain what is missing in freeform_notes.\n"
+            },
+            {
+                "role": "system",
+                "content": "Onboarding field: learning_texture\nPurpose: learn what kinds of explanations or activities help things click. Good question shape: When learning something new, what usually helps it click: examples, stories, visuals, analogies, hands-on projects, big-picture maps, or discussion?.\nTask: ask the user one concise question that collects this field for an exploratory-learning profile.\nUse the suggested prompt shape if it fits, but adapt to the transcript naturally.\nDo not answer for the user."
+            },
+            {
+                "role": "user",
+                "content": "BEGIN TRANSCRIPT\nASSISTANT: When learning something new, what usually helps it click: examples, stories, visuals, analogies, hands-on projects, big-picture maps, or discussion? How do you prefer to receive information to better understand complex concepts like game loops and physics simulation?\n\nUSER: Examples and hands-on projects help most. I like visual explanations too.\n\nEND TRANSCRIPT"
+            }
+        ]
+    },
+    {
+        "role": "assistant",
+        "content": "By the end of a good exploration, what would you like to walk away with: a clear explanation, a mental model, something made, next questions, a practical skill, or a surprising insight? How do you prefer information delivery to better understand complex concepts?",
+        "task_name": "onboarding_transition",
+        "visible": true,
+        "dynamic_prompts": [
+            "Onboarding field: desired_outcome\nPurpose: learn what would make the first session feel worthwhile. Good question shape: By the end of a good exploration, what would you like to walk away with: a clear explanation, a mental model, something made, next questions, a practical skill, or a surprising insight?.\nTask: ask the user one concise question that collects this field for an exploratory-learning profile.\nUse the suggested prompt shape if it fits, but adapt to the transcript naturally.\nDo not answer for the user."
+        ],
+        "input_messages": [
+            {
+                "role": "system",
+                "content": "You transition between onboarding fields.\n\nInput:\n- the completed field transcript\n- the next onboarding field\n\nOutput exactly two sentences:\n1. Briefly acknowledge the useful signal from the completed field.\n2. Ask one question for the next onboarding field.\n\nRules:\n- Ask exactly one question.\n- Do not answer for the user.\n- Do not mention internal field names.\n- Do not ask about the previous field again.\n- Use the transcript only for the closing sentence.\n- Keep it natural and concise.\n"
+            },
+            {
+                "role": "system",
+                "content": "Onboarding field: desired_outcome\nPurpose: learn what would make the first session feel worthwhile. Good question shape: By the end of a good exploration, what would you like to walk away with: a clear explanation, a mental model, something made, next questions, a practical skill, or a surprising insight?.\nTask: ask the user one concise question that collects this field for an exploratory-learning profile.\nUse the suggested prompt shape if it fits, but adapt to the transcript naturally.\nDo not answer for the user."
+            },
+            {
+                "role": "user",
+                "content": "Completed field transcript:\nASSISTANT: When learning something new, what usually helps it click: examples, stories, visuals, analogies, hands-on projects, big-picture maps, or discussion? How do you prefer to receive information to better understand complex concepts like game loops and physics simulation?\nUSER: Examples and hands-on projects help most. I like visual explanations too.\n\nNext onboarding field: desired_outcome\nPurpose: learn what would make the first session feel worthwhile. Good question shape: By the end of a good exploration, what would you like to walk away with: a clear explanation, a mental model, something made, next questions, a practical skill, or a surprising insight?.\nUse the transcript only to close the completed field.\nThe next question must collect the next field for an exploratory-learning profile.\nWrite exactly two sentences."
+            }
+        ]
+    },
+    {
+        "role": "user",
+        "content": "I want to walk away with a mental model and a tiny thing I made.",
+        "task_name": null,
+        "visible": true,
+        "dynamic_prompts": [],
+        "input_messages": []
+    },
+    {
+        "role": "assistant",
+        "content": "{\"field\": \"desired_outcome\", \"confidence\": 0.7, \"value\": \"...\", \"signals\": [\"mental model\", \"something made\"], \"freeform_notes\": \"The user provided specific preferences for what they want to achieve from the exploration.\", \"evidence\": \"USER: I want to walk away with a mental model and a tiny thing I made.\"}",
+        "task_name": "onboarding_profile_extraction",
+        "visible": false,
+        "dynamic_prompts": [
+            "Onboarding field: desired_outcome\nPurpose: learn what would make the first session feel worthwhile. Good question shape: By the end of a good exploration, what would you like to walk away with: a clear explanation, a mental model, something made, next questions, a practical skill, or a surprising insight?.\nTask: ask the user one concise question that collects this field for an exploratory-learning profile.\nUse the suggested prompt shape if it fits, but adapt to the transcript naturally.\nDo not answer for the user."
+        ],
+        "input_messages": [
+            {
+                "role": "system",
+                "content": "You are a profile extraction system.\n\nAnalyze the onboarding transcript only. Do not answer the user or continue the conversation.\n\nUse the onboarding field in the transcript to decide what signal to extract. Base every claim on evidence.\n\nReturn strict JSON only:\n\n{\n  \"field\": \"curiosity_anchor | starting_point | learning_texture | desired_outcome | avoid\",\n  \"confidence\": 0.7,\n  \"value\": \"...\",\n  \"signals\": [\"...\"],\n  \"freeform_notes\": \"...\",\n  \"evidence\": \"brief transcript evidence\"\n}\n\nRules:\n- Prefer fewer high-confidence observations.\n- Preserve the user's own phrasing when it is meaningful.\n- Extract from the user's answers, not from wording in the assistant questions.\n- Never use \"...\" as a value if the user gave a real answer.\n- Do not infer personality traits or diagnose ability.\n- Do not invent prior knowledge, goals, or preferences.\n- If the signal is unclear, set confidence below 0.5 and explain what is missing in freeform_notes.\n"
+            },
+            {
+                "role": "system",
+                "content": "Onboarding field: desired_outcome\nPurpose: learn what would make the first session feel worthwhile. Good question shape: By the end of a good exploration, what would you like to walk away with: a clear explanation, a mental model, something made, next questions, a practical skill, or a surprising insight?.\nTask: ask the user one concise question that collects this field for an exploratory-learning profile.\nUse the suggested prompt shape if it fits, but adapt to the transcript naturally.\nDo not answer for the user."
+            },
+            {
+                "role": "user",
+                "content": "BEGIN TRANSCRIPT\nASSISTANT: By the end of a good exploration, what would you like to walk away with: a clear explanation, a mental model, something made, next questions, a practical skill, or a surprising insight? How do you prefer information delivery to better understand complex concepts?\n\nUSER: I want to walk away with a mental model and a tiny thing I made.\n\nEND TRANSCRIPT"
+            }
+        ]
+    },
+    {
+        "role": "assistant",
+        "content": "By walking away with a mental model and something you made, how do you feel about being introduced to complex concepts in a straightforward manner? What should I avoid so this does not feel like school: jargon, long lectures, quizzes, homework, going too slowly, going too fast, too much theory, or too few examples?",
+        "task_name": "onboarding_transition",
+        "visible": true,
+        "dynamic_prompts": [
+            "Onboarding field: avoid\nPurpose: learn what makes learning feel boring, frustrating, or too much like school. Good question shape: What should I avoid so this does not feel like school: jargon, long lectures, quizzes, homework, going too slowly, going too fast, too much theory, or too few examples?.\nTask: ask the user one concise question that collects this field for an exploratory-learning profile.\nUse the suggested prompt shape if it fits, but adapt to the transcript naturally.\nDo not answer for the user."
+        ],
+        "input_messages": [
+            {
+                "role": "system",
+                "content": "You transition between onboarding fields.\n\nInput:\n- the completed field transcript\n- the next onboarding field\n\nOutput exactly two sentences:\n1. Briefly acknowledge the useful signal from the completed field.\n2. Ask one question for the next onboarding field.\n\nRules:\n- Ask exactly one question.\n- Do not answer for the user.\n- Do not mention internal field names.\n- Do not ask about the previous field again.\n- Use the transcript only for the closing sentence.\n- Keep it natural and concise.\n"
+            },
+            {
+                "role": "system",
+                "content": "Onboarding field: avoid\nPurpose: learn what makes learning feel boring, frustrating, or too much like school. Good question shape: What should I avoid so this does not feel like school: jargon, long lectures, quizzes, homework, going too slowly, going too fast, too much theory, or too few examples?.\nTask: ask the user one concise question that collects this field for an exploratory-learning profile.\nUse the suggested prompt shape if it fits, but adapt to the transcript naturally.\nDo not answer for the user."
+            },
+            {
+                "role": "user",
+                "content": "Completed field transcript:\nASSISTANT: By the end of a good exploration, what would you like to walk away with: a clear explanation, a mental model, something made, next questions, a practical skill, or a surprising insight? How do you prefer information delivery to better understand complex concepts?\nUSER: I want to walk away with a mental model and a tiny thing I made.\n\nNext onboarding field: avoid\nPurpose: learn what makes learning feel boring, frustrating, or too much like school. Good question shape: What should I avoid so this does not feel like school: jargon, long lectures, quizzes, homework, going too slowly, going too fast, too much theory, or too few examples?.\nUse the transcript only to close the completed field.\nThe next question must collect the next field for an exploratory-learning profile.\nWrite exactly two sentences."
+            }
+        ]
+    },
+    {
+        "role": "user",
+        "content": "Please avoid long lectures, jargon, and quiz vibes.",
+        "task_name": null,
+        "visible": true,
+        "dynamic_prompts": [],
+        "input_messages": []
+    },
+    {
+        "role": "assistant",
+        "content": "{\"field\": \"avoid\", \"confidence\": 0.7, \"value\": \"long lectures, jargon, and quiz vibes\", \"signals\": [\"jargon\", \"long lectures\", \"quizzes\"], \"freeform_notes\": \"User mentioned avoiding long lectures, jargon, and quizzes.\", \"evidence\": \"USER: Please avoid long lectures, jargon, and quiz vibes.\"}",
+        "task_name": "onboarding_profile_extraction",
+        "visible": false,
+        "dynamic_prompts": [
+            "Onboarding field: avoid\nPurpose: learn what makes learning feel boring, frustrating, or too much like school. Good question shape: What should I avoid so this does not feel like school: jargon, long lectures, quizzes, homework, going too slowly, going too fast, too much theory, or too few examples?.\nTask: ask the user one concise question that collects this field for an exploratory-learning profile.\nUse the suggested prompt shape if it fits, but adapt to the transcript naturally.\nDo not answer for the user."
+        ],
+        "input_messages": [
+            {
+                "role": "system",
+                "content": "You are a profile extraction system.\n\nAnalyze the onboarding transcript only. Do not answer the user or continue the conversation.\n\nUse the onboarding field in the transcript to decide what signal to extract. Base every claim on evidence.\n\nReturn strict JSON only:\n\n{\n  \"field\": \"curiosity_anchor | starting_point | learning_texture | desired_outcome | avoid\",\n  \"confidence\": 0.7,\n  \"value\": \"...\",\n  \"signals\": [\"...\"],\n  \"freeform_notes\": \"...\",\n  \"evidence\": \"brief transcript evidence\"\n}\n\nRules:\n- Prefer fewer high-confidence observations.\n- Preserve the user's own phrasing when it is meaningful.\n- Extract from the user's answers, not from wording in the assistant questions.\n- Never use \"...\" as a value if the user gave a real answer.\n- Do not infer personality traits or diagnose ability.\n- Do not invent prior knowledge, goals, or preferences.\n- If the signal is unclear, set confidence below 0.5 and explain what is missing in freeform_notes.\n"
+            },
+            {
+                "role": "system",
+                "content": "Onboarding field: avoid\nPurpose: learn what makes learning feel boring, frustrating, or too much like school. Good question shape: What should I avoid so this does not feel like school: jargon, long lectures, quizzes, homework, going too slowly, going too fast, too much theory, or too few examples?.\nTask: ask the user one concise question that collects this field for an exploratory-learning profile.\nUse the suggested prompt shape if it fits, but adapt to the transcript naturally.\nDo not answer for the user."
+            },
+            {
+                "role": "user",
+                "content": "BEGIN TRANSCRIPT\nASSISTANT: By walking away with a mental model and something you made, how do you feel about being introduced to complex concepts in a straightforward manner? What should I avoid so this does not feel like school: jargon, long lectures, quizzes, homework, going too slowly, going too fast, too much theory, or too few examples?\n\nUSER: Please avoid long lectures, jargon, and quiz vibes.\n\nEND TRANSCRIPT"
+            }
+        ]
+    },
+    {
+        "role": "assistant",
+        "content": "{\"topics\": {\"game_simulation_behavior\": {\"intuition\": 0.2, \"details\": 0.1, \"confidence\": 0.5}}, \"preferences\": {\"explanation_style\": [\"examples\", \"hands_on_projects\"], \"dislikes\": [\"long_lectures\", \"jargon\", \"quizzes\"], \"desired_outcomes\": [\"mental_model\", \"practical_skill\"]}, \"interests\": [\"game_simulation_behavior\"], \"current_topics\": [\"game_simulation_behavior\"]}",
+        "task_name": "onboarding_profile_seed",
+        "visible": false,
+        "dynamic_prompts": [],
+        "input_messages": [
+            {
+                "role": "system",
+                "content": "You generate a compact user profile seed from exploratory-learning onboarding.\n\nAnalyze the full onboarding transcript only. Do not answer the user or continue the conversation.\n\nThe profile is a sparse overlay on a topic graph. Keep it compact. Do not include evidence, explanations, or conversation summaries.\n\nReturn strict JSON only:\n\n{\n  \"topics\": {\n    \"canonical_topic_id\": {\n      \"intuition\": 0.0,\n      \"details\": 0.0,\n      \"confidence\": 0.5\n    }\n  },\n  \"preferences\": {\n    \"explanation_style\": [\"...\"],\n    \"dislikes\": [\"...\"],\n    \"desired_outcomes\": [\"...\"]\n  },\n  \"interests\": [\"...\"],\n  \"current_topics\": [\"...\"]\n}\n\nRules:\n- Use snake_case canonical topic IDs.\n- Add only topics directly supported by the transcript.\n- Use low confidence for tentative onboarding inferences.\n- For topics the user says they know a little, use low-but-nonzero intuition/details.\n- For topics the user says they do not know yet, use zero intuition/details with moderate confidence.\n- Preferences should be durable teaching defaults, not one-off details.\n- Interests should be topic-like strings, not full sentences.\n- Current topics should be the most useful starting topic IDs for the first learning session.\n- Do not include fields outside the JSON schema.\n"
+            },
+            {
+                "role": "user",
+                "content": "BEGIN TRANSCRIPT\nASSISTANT: What have you been curious about lately, even if it seems random or hard to explain?\n\nUSER: I keep wondering how people make tiny games and simulations, especially the parts where simple rules create surprising behavior.\n\nASSISTANT: You've been curious about how simple rules can lead to complex behavior in games and simulations. For that topic, should we start from the basics or move a bit deeper?\n\nUSER: I have done a little Python, but I do not really know game loops or physics simulation yet.\n\nASSISTANT: When learning something new, what usually helps it click: examples, stories, visuals, analogies, hands-on projects, big-picture maps, or discussion? How do you prefer to receive information to better understand complex concepts like game loops and physics simulation?\n\nUSER: Examples and hands-on projects help most. I like visual explanations too.\n\nASSISTANT: By the end of a good exploration, what would you like to walk away with: a clear explanation, a mental model, something made, next questions, a practical skill, or a surprising insight? How do you prefer information delivery to better understand complex concepts?\n\nUSER: I want to walk away with a mental model and a tiny thing I made.\n\nASSISTANT: By walking away with a mental model and something you made, how do you feel about being introduced to complex concepts in a straightforward manner? What should I avoid so this does not feel like school: jargon, long lectures, quizzes, homework, going too slowly, going too fast, too much theory, or too few examples?\n\nUSER: Please avoid long lectures, jargon, and quiz vibes.\n\nEND TRANSCRIPT"
+            }
+        ]
+    },
+    {
+        "role": "assistant",
+        "content": "Summarizing the learner profile, you're a curious individual who enjoys making simple games and simulations. You have basic Python skills but are new to concepts like game loops and physics simulation.",
+        "task_name": "onboarding_complete",
+        "visible": true,
+        "dynamic_prompts": [],
+        "input_messages": [
+            {
+                "role": "system",
+                "content": "You finish exploratory-learning onboarding.\n\nInput:\n- the full onboarding transcript\n\nOutput exactly two short sentences:\n1. Summarize the learner profile in warm, concrete language.\n2. Launch the first learning experience by naming the topic, level, preferred style, and guardrails.\n\nRules:\n- Do not mention internal field names.\n- Do not say the profile is complete.\n- Do not ask another onboarding question.\n- Do not invent details.\n- Keep it conversational and specific.\n"
+            },
+            {
+                "role": "user",
+                "content": "BEGIN TRANSCRIPT\nASSISTANT: What have you been curious about lately, even if it seems random or hard to explain?\n\nUSER: I keep wondering how people make tiny games and simulations, especially the parts where simple rules create surprising behavior.\n\nASSISTANT: You've been curious about how simple rules can lead to complex behavior in games and simulations. For that topic, should we start from the basics or move a bit deeper?\n\nUSER: I have done a little Python, but I do not really know game loops or physics simulation yet.\n\nASSISTANT: When learning something new, what usually helps it click: examples, stories, visuals, analogies, hands-on projects, big-picture maps, or discussion? How do you prefer to receive information to better understand complex concepts like game loops and physics simulation?\n\nUSER: Examples and hands-on projects help most. I like visual explanations too.\n\nASSISTANT: By the end of a good exploration, what would you like to walk away with: a clear explanation, a mental model, something made, next questions, a practical skill, or a surprising insight? How do you prefer information delivery to better understand complex concepts?\n\nUSER: I want to walk away with a mental model and a tiny thing I made.\n\nASSISTANT: By walking away with a mental model and something you made, how do you feel about being introduced to complex concepts in a straightforward manner? What should I avoid so this does not feel like school: jargon, long lectures, quizzes, homework, going too slowly, going too fast, too much theory, or too few examples?\n\nUSER: Please avoid long lectures, jargon, and quiz vibes.\n\nEND TRANSCRIPT"
+            }
+        ]
+    },
+    {
+        "role": "assistant",
+        "content": "For your first learning experience, let's start with understanding game loops and physics simulation at an introductory level. We'll use examples, hands-on projects, and visual explanations to help you grasp these complex ideas.",
+        "task_name": "onboarding_complete",
+        "visible": true,
+        "dynamic_prompts": [],
+        "input_messages": [
+            {
+                "role": "system",
+                "content": "You finish exploratory-learning onboarding.\n\nInput:\n- the full onboarding transcript\n\nOutput exactly two short sentences:\n1. Summarize the learner profile in warm, concrete language.\n2. Launch the first learning experience by naming the topic, level, preferred style, and guardrails.\n\nRules:\n- Do not mention internal field names.\n- Do not say the profile is complete.\n- Do not ask another onboarding question.\n- Do not invent details.\n- Keep it conversational and specific.\n"
+            },
+            {
+                "role": "user",
+                "content": "BEGIN TRANSCRIPT\nASSISTANT: What have you been curious about lately, even if it seems random or hard to explain?\n\nUSER: I keep wondering how people make tiny games and simulations, especially the parts where simple rules create surprising behavior.\n\nASSISTANT: You've been curious about how simple rules can lead to complex behavior in games and simulations. For that topic, should we start from the basics or move a bit deeper?\n\nUSER: I have done a little Python, but I do not really know game loops or physics simulation yet.\n\nASSISTANT: When learning something new, what usually helps it click: examples, stories, visuals, analogies, hands-on projects, big-picture maps, or discussion? How do you prefer to receive information to better understand complex concepts like game loops and physics simulation?\n\nUSER: Examples and hands-on projects help most. I like visual explanations too.\n\nASSISTANT: By the end of a good exploration, what would you like to walk away with: a clear explanation, a mental model, something made, next questions, a practical skill, or a surprising insight? How do you prefer information delivery to better understand complex concepts?\n\nUSER: I want to walk away with a mental model and a tiny thing I made.\n\nASSISTANT: By walking away with a mental model and something you made, how do you feel about being introduced to complex concepts in a straightforward manner? What should I avoid so this does not feel like school: jargon, long lectures, quizzes, homework, going too slowly, going too fast, too much theory, or too few examples?\n\nUSER: Please avoid long lectures, jargon, and quiz vibes.\n\nEND TRANSCRIPT"
+            }
+        ]
+    }
+]

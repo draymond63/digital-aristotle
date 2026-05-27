@@ -114,7 +114,7 @@ class Aristotle:
         )
         related_topics = self.sql_db.get_related_topics_pretty(topics)
 
-        # TODO: Filter user profile to relevant domains
+        # TODO: Filter user profile to relevant topics
         prompt = f"User profile:\n{self.profile}\n\n"
         if len(insights):
             prompt += f"insights the user has had:\n{insights}\n\n"

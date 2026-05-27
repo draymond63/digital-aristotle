@@ -37,7 +37,7 @@ def main():
 
     brain = OnboardingBrain()
     brain.set_convo(conversation)
-    brain.curr_dim = 0
+    brain.field_index = 0
 
     print(f"Loaded {len(conversation)} visible messages.")
     print(f"Skipped persisted control message from {control_source!r}: {control_text!r}")
