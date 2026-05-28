@@ -13,6 +13,7 @@ dependencies = [
     "openai",
     "chromadb",
     "pysqlite3",
+    "pytest",
     "transformers", # For tokenization
     "python-dotenv",
 

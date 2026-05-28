@@ -1,11 +1,20 @@
-from brains.comms.agent_base import Brain, Task, Conversation, get_control_model
-from brains.comms.prompts_onboarder import *
+from brains.comms.agent_base import Task, Conversation, get_control_model
+from brains.comms.prompts_onboarder import (
+    ASSESSMENT_TRANSITION_PROMPT,
+    ONBOARDING_COMPLETE_PROMPT,
+    ONBOARDING_PROMPT,
+    ONBOARDING_TRANSITION_PROMPT,
+    PROFILE_EXTRACTION_PROMPT,
+    PROFILE_SEED_PROMPT,
+    SECTION_TRANSITION_PROMPT,
+)
+from brains.comms.task_conversation import TaskConversation
 from brains.data.profile import Profile
 from brains.data.profile import normalize_identifier
 
 
 
-class OnboardingBrain(Brain):
+class OnboardingBrain(TaskConversation):
     user_dimensions = {
         "curiosity_anchor": (
             "what the learner wants to explore first, or whether they need help finding a starting point."
@@ -36,13 +45,11 @@ class OnboardingBrain(Brain):
     questions_per_dimension = 1
 
     def __init__(self, username: str = "daniel", messages=None):
+        super().__init__(messages=messages)
         self.username = username
         self.profile_seed = None
         self.helped_find_curiosity = False
         self.curiosity_answer = None
-        super().__init__(messages)
-
-    def __post_init__(self):
         self.ask_task = Task(
             "onboarding_question",
             ONBOARDING_PROMPT,
@@ -268,16 +275,3 @@ class OnboardingBrain(Brain):
         )
         return SECTION_TRANSITION_PROMPT(dimension, meaning, transcript)
 
-    # TODO: Middle to evaluate end of conversation, or get the tester to emit hidden state at the bottom
-
-
-
-
-if __name__ == "__main__":
-    from brains.comms.agent_base import Conversation
-    brain = OnboardingBrain()
-    # list(brain.start())
-    convo = Conversation.load(r"data\conversations\onboarding-1.json")[:-2]
-    brain.set_convo(convo)
-    list(brain.transition_to_next_topic())
-    brain.chat_local()

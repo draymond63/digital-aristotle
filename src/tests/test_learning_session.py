@@ -131,13 +131,6 @@ class FakeAgent:
                     {"title": "Worked example", "objective": "Track position and velocity."},
                 ],
             }
-        if task.name == "state_eval":
-            return {
-                "understanding": 0.2,
-                "confidence": 0.9,
-                "intent": "continue",
-                "evidence": "test",
-            }
         if task.name == "session_finalizer":
             self.finalized = True
             return {
@@ -188,8 +181,6 @@ class FakeAgent:
     def run_task(self, task, conversation, dynamic_prompts=None, packet=None):
         if task.name == "teacher":
             return "A Kalman filter alternates prediction and correction."
-        if task.name == "understanding_check":
-            return "If the measurement is noisy, should the estimate move more or less toward it?"
         raise AssertionError(f"Unexpected text task: {task.name}")
 
     def stream_task(self, task, conversation, dynamic_prompts=None, packet=None):

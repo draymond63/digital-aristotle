@@ -20,7 +20,6 @@ CONVERSATION_PROBE_PREFIXES = (
     "codex-",
     "onboarding-",
     "onboarding-feel-test",
-    "daniel-converser-long-run",
 )
 
 USER_TABLE_PREDICATES = {

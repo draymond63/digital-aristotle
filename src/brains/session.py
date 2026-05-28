@@ -1,90 +1,25 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Literal
 import json
 
-from brains.comms.agent_base import Agent, Conversation, Task, get_control_model
-from brains.comms.converser import ConversationBrain
+from brains.comms.agent_base import Agent, Conversation, Task, get_control_model, get_teacher_model
+from brains.comms.prompts_teacher import TEACHER_PROMPT
 from brains.comms.prompts_session import (
-    GOAL_INTAKE_PROMPT,
     QUESTION_GOAL_LINK_PROMPT,
     SESSION_FINALIZATION_PROMPT,
     SYLLABUS_PROMPT,
 )
+from brains.comms.task_conversation import TaskConversation
 from brains.data.db_sql import SQLDatabase
 from brains.data.db_vector import Collection, SemanticDatabase
 from brains.data.profile import Profile, normalize_identifier
+from brains.goal_intake import GoalIntake
+from brains.session_types import CommandResult, FinalizationReport, HELP_TEXT, SessionMode
 
 
-SessionMode = Literal["idle", "goal_intake", "goal_confirm", "goal", "question"]
-
-
-@dataclass
-class CommandResult:
-    text: str
-    should_quit: bool = False
-
-
-@dataclass
-class FinalizationReport:
-    summary: str
-    next_step: str
-    conversation_path: str
-    profile_backup_path: str
-    audit_id: str
-    milestone_status: str = "continue"
-    memories_saved: int = 0
-    topics_updated: list[str] = field(default_factory=list)
-    topic_update_notes: list[str] = field(default_factory=list)
-    graph_changes: int = 0
-
-    def render(self) -> str:
-        lines = [
-            "Done. I saved this learning session.",
-            "",
-            f"Today you clarified: {self.summary}",
-            f"Next time, we will pick up at: {self.next_step}",
-            "",
-            f"Conversation: {self.conversation_path}",
-            f"Profile backup: {self.profile_backup_path}",
-            f"Audit log: {self.audit_id}",
-        ]
-        if self.topics_updated:
-            lines.append(f"Profile topics updated: {', '.join(self.topics_updated)}")
-        if self.milestone_status == "continue":
-            lines.append("Milestone status: continuing this milestone next time")
-        elif self.milestone_status == "done":
-            lines.append("Milestone status: ready for the next milestone")
-        if self.topic_update_notes:
-            lines.append("Why those profile updates:")
-            lines.extend(f"- {note}" for note in self.topic_update_notes)
-        if self.memories_saved:
-            lines.append(f"Memories saved: {self.memories_saved}")
-        if self.graph_changes:
-            lines.append(f"Topic graph changes: {self.graph_changes}")
-        return "\n".join(lines)
-
-
-HELP_TEXT = """Commands:
-/goal <topic or outcome>  Start a resumable learning goal.
-/learn <topic or outcome> Same as /goal.
-/continue                Resume your most recent active goal.
-/goals                   Show active goals.
-/ask <question>          Ask a one-off question without creating a goal.
-/done                    Finish this session and persist learning updates.
-/save                    Save the current conversation without finalizing.
-/profile                 Show your compact learner profile.
-/topic                   Show the current topic or goal context.
-/new                     Save this conversation and start fresh.
-/help                    Show this help.
-/quit                    Save and exit.
-"""
-
-
-class LearningSession:
+class LearningSession(TaskConversation):
     def __init__(
         self,
         user_id: str = "daniel",
@@ -92,35 +27,35 @@ class LearningSession:
         vector_db: SemanticDatabase | None = None,
         profile: Profile | None = None,
         agent: Agent | None = None,
-        brain: ConversationBrain | None = None,
     ):
+        super().__init__(agent=agent)
         self.user_id = normalize_identifier(user_id) or "default_user"
         self.sql_db = sql_db or SQLDatabase()
         self.vector_db = vector_db or SemanticDatabase()
         self.profile = profile or Profile.load_user(self.user_id)
-        self.agent = agent or Agent()
-        self.brain = brain or ConversationBrain()
-        self.brain.agent = self.agent
+        self.teacher_context = ""
         self.sql_db.abandon_active_question_sessions(self.user_id)
         self.mode: SessionMode = "idle"
         self.active_goal_id: str | None = None
         self.active_session_id: str | None = None
         self.active_topic_id: str | None = None
         self.active_syllabus_item_id: str | None = None
-        self.goal_intake: list[str] = []
-        self.goal_intake_transcript: list[tuple[str, str]] = []
-        self.pending_goal_theme: str | None = None
-        self.pending_goal_adjacent: list[str] = []
-        self.pending_resolved_goal: str | None = None
-
-        self.goal_intake_task = Task(
-            "goal_intake",
-            GOAL_INTAKE_PROMPT,
-            model=get_control_model(),
-            context_format="packet",
-            output_format="json",
-            temperature=0.1,
-            num_predict=220,
+        self.goal_intake_flow = GoalIntake(
+            agent=self.agent,
+            profile=self.profile,
+            create_goal=self.create_goal,
+            close_active_question=self._close_active_question_session,
+            reset_conversation=self._reset_conversation,
+            set_mode=self._set_mode,
+        )
+        self.teacher_task = Task(
+            "teacher",
+            TEACHER_PROMPT,
+            model=get_teacher_model(),
+            visible_history=12,
+            dynamic_after_context=True,
+            temperature=0.35,
+            num_predict=360,
         )
         self.syllabus_task = Task(
             "syllabus_planner",
@@ -151,6 +86,46 @@ class LearningSession:
             num_predict=160,
         )
 
+    @property
+    def goal_intake(self) -> list[str]:
+        return self.goal_intake_flow.messages
+
+    @goal_intake.setter
+    def goal_intake(self, value: list[str]):
+        self.goal_intake_flow.messages = value
+
+    @property
+    def goal_intake_transcript(self) -> list[tuple[str, str]]:
+        return self.goal_intake_flow.transcript
+
+    @goal_intake_transcript.setter
+    def goal_intake_transcript(self, value: list[tuple[str, str]]):
+        self.goal_intake_flow.transcript = value
+
+    @property
+    def pending_goal_theme(self) -> str | None:
+        return self.goal_intake_flow.pending_theme
+
+    @pending_goal_theme.setter
+    def pending_goal_theme(self, value: str | None):
+        self.goal_intake_flow.pending_theme = value
+
+    @property
+    def pending_goal_adjacent(self) -> list[str]:
+        return self.goal_intake_flow.pending_adjacent
+
+    @pending_goal_adjacent.setter
+    def pending_goal_adjacent(self, value: list[str]):
+        self.goal_intake_flow.pending_adjacent = value
+
+    @property
+    def pending_resolved_goal(self) -> str | None:
+        return self.goal_intake_flow.pending_resolved_goal
+
+    @pending_resolved_goal.setter
+    def pending_resolved_goal(self, value: str | None):
+        self.goal_intake_flow.pending_resolved_goal = value
+
     def startup_message(self) -> str:
         goal = self.sql_db.get_recent_active_goal(self.user_id)
         lines = [f"Hi {self.user_id}. What do you want to understand today?"]
@@ -165,6 +140,9 @@ class LearningSession:
             lines.append("Type /goal <topic> for a long-term path, or just ask a one-off question.")
         return "\n".join(lines)
 
+    def _set_mode(self, mode: str):
+        self.mode = mode
+
     def handle(self, text: str) -> CommandResult:
         text = text.strip()
         if not text:
@@ -172,7 +150,7 @@ class LearningSession:
         if text.startswith("/"):
             return self.handle_command(text)
         if self.mode in {"goal_intake", "goal_confirm"}:
-            return CommandResult(self.continue_goal_intake(text))
+            return CommandResult(self.goal_intake_flow.continue_intake(text, self.mode))
         if self.mode == "goal" and self.active_goal_id:
             return CommandResult(self._goal_turn(text))
         return CommandResult(self.ask(text))
@@ -183,24 +161,16 @@ class LearningSession:
         arg = arg.strip()
         match command:
             case "/goal" | "/learn":
-                return CommandResult(self.start_goal_intake(arg or None))
+                return CommandResult(self.goal_intake_flow.start(arg or None))
             case "/continue":
-                self.goal_intake = []
-                self.goal_intake_transcript = []
-                self.pending_goal_theme = None
-                self.pending_goal_adjacent = []
-                self.pending_resolved_goal = None
+                self.goal_intake_flow.clear()
                 return CommandResult(self.continue_goal())
             case "/goals":
                 return CommandResult(self.render_goals())
             case "/ask":
                 if not arg:
                     return CommandResult("Ask it like this: /ask what is covariance?")
-                self.goal_intake = []
-                self.goal_intake_transcript = []
-                self.pending_goal_theme = None
-                self.pending_goal_adjacent = []
-                self.pending_resolved_goal = None
+                self.goal_intake_flow.clear()
                 return CommandResult(self.ask(arg))
             case "/done":
                 return CommandResult(self.finalize().render())
@@ -212,17 +182,13 @@ class LearningSession:
                 return CommandResult(self.render_topic())
             case "/new":
                 path = self.save_partial(close_status="saved")
-                self._reset_brain()
+                self._reset_conversation()
                 self.mode = "idle"
                 self.active_goal_id = None
                 self.active_session_id = None
                 self.active_topic_id = None
                 self.active_syllabus_item_id = None
-                self.goal_intake = []
-                self.goal_intake_transcript = []
-                self.pending_goal_theme = None
-                self.pending_goal_adjacent = []
-                self.pending_resolved_goal = None
+                self.goal_intake_flow.clear()
                 return CommandResult(f"Saved the previous conversation to {path}\nFresh session ready.")
             case "/help":
                 return CommandResult(HELP_TEXT)
@@ -231,202 +197,6 @@ class LearningSession:
                 return CommandResult(f"Saved conversation to {path}", should_quit=True)
             case _:
                 return CommandResult(f"I do not know {command} yet.\n\n{HELP_TEXT}")
-
-    def start_goal_intake(self, initial_text: str | None = None) -> str:
-        self._close_active_question_session(status="answered")
-        self._reset_brain()
-        self.mode = "goal_intake"
-        self.active_goal_id = None
-        self.active_topic_id = None
-        self.active_syllabus_item_id = None
-        self.goal_intake = []
-        self.goal_intake_transcript = []
-        self.pending_goal_theme = None
-        self.pending_goal_adjacent = []
-        self.pending_resolved_goal = None
-        if not initial_text:
-            return (
-                "What do you want to learn?\n"
-                "A rough answer is fine. I will help sharpen it before making a goal."
-            )
-        return self.continue_goal_intake(initial_text)
-
-    def continue_goal_intake(self, text: str) -> str:
-        if self.mode == "goal_confirm":
-            if self._is_goal_confirmation(text):
-                resolved_goal = self.pending_resolved_goal or self._fallback_resolved_goal()
-                self.goal_intake = []
-                self.goal_intake_transcript = []
-                self.pending_goal_theme = None
-                self.pending_goal_adjacent = []
-                self.pending_resolved_goal = None
-                prefix = f"Great. I will make this the track: {resolved_goal}\n\n"
-                return prefix + self.create_goal(resolved_goal)
-            self.pending_resolved_goal = None
-            self.mode = "goal_intake"
-
-        self.goal_intake.append(text.strip())
-        self.goal_intake_transcript.append(("user", text.strip()))
-        decision = self._evaluate_goal_intake()
-        if len(self.goal_intake) == 1:
-            question = self._format_theme_clarification(decision)
-            self.goal_intake_transcript.append(("assistant", question))
-            return question
-        if decision.get("status") == "ready" and decision.get("resolved_goal"):
-            resolved_goal = self._clean_resolved_goal(decision["resolved_goal"])
-            if not self._valid_resolved_goal(resolved_goal):
-                resolved_goal = self._fallback_resolved_goal()
-            resolved_goal = self._include_confirmed_adjacent_concepts(resolved_goal)
-            self.pending_resolved_goal = resolved_goal
-            self.mode = "goal_confirm"
-            return (
-                f"Here is the goal I would create:\n"
-                f"{resolved_goal}\n\n"
-                "Reply yes to create it, or tell me what to change."
-            )
-        question = decision.get("question") or self._fallback_goal_clarification()
-        self.goal_intake_transcript.append(("assistant", question.strip()))
-        return question.strip()
-
-    def _evaluate_goal_intake(self) -> dict:
-        transcript = "\n".join(
-            f"{role.capitalize()}: {message}" for role, message in self.goal_intake_transcript
-        )
-        packet = (
-            f"User profile:\n{self.profile}\n\n"
-            "Goal-intake conversation:\n"
-            + transcript
-        )
-        try:
-            decision = self.agent.run_task_json(self.goal_intake_task, Conversation(), packet=packet)
-        except Exception:
-            decision = {}
-        if not isinstance(decision, dict):
-            return {"status": "clarify", "question": self._fallback_goal_clarification(), "resolved_goal": ""}
-        if len(self.goal_intake) < 2:
-            return {
-                "status": "clarify",
-                "question": decision.get("question") or self._fallback_goal_clarification(),
-                "resolved_goal": "",
-                "candidate_theme": decision.get("candidate_theme") or "",
-                "adjacent_concepts": decision.get("adjacent_concepts") or [],
-                "rationale": "Goal creation requires at least one clarification turn.",
-            }
-        if len(self.goal_intake) >= 2 and decision.get("status") != "ready":
-            return {
-                "status": "ready",
-                "resolved_goal": self._fallback_resolved_goal(),
-                "question": "",
-                "rationale": "Resolved after clarification turn.",
-            }
-        return decision
-
-    def _fallback_goal_clarification(self) -> str:
-        return (
-            "I hear a cluster of examples, but not quite the center yet. "
-            "What central theme or capability are you hoping this turns into?"
-        )
-
-    def _fallback_resolved_goal(self) -> str:
-        if self.pending_goal_theme:
-            adjacent = self._format_adjacent(self.pending_goal_adjacent)
-            if adjacent:
-                return f"build understanding of {self.pending_goal_theme}, including {adjacent}"
-            return f"build understanding of {self.pending_goal_theme}"
-        return self._clean_resolved_goal(" ".join(self.goal_intake).strip())
-
-    def _include_confirmed_adjacent_concepts(self, goal: str) -> str:
-        if not self.pending_goal_adjacent:
-            return goal
-        latest = normalize_identifier(self.goal_intake[-1]) if self.goal_intake else ""
-        acceptance_signals = ("yes", "include", "adjacent", "nearby", "that_is_the_center", "sounds_right")
-        if not any(signal in latest for signal in acceptance_signals):
-            return goal
-        missing = [
-            concept
-            for concept in self.pending_goal_adjacent
-            if not self._concept_already_covered(concept, goal)
-        ]
-        if not missing:
-            return goal
-        return f"{goal}, plus {self._format_adjacent(missing)}"
-
-    @staticmethod
-    def _concept_already_covered(concept: str, goal: str) -> bool:
-        concept_id = normalize_identifier(concept)
-        goal_id = normalize_identifier(goal)
-        if not concept_id:
-            return True
-        if concept_id in goal_id:
-            return True
-        parts = [part for part in concept_id.split("_and_") if part]
-        return any(part in goal_id for part in parts)
-
-    def _format_theme_clarification(self, decision: dict) -> str:
-        theme = self._clean_resolved_goal(str(decision.get("candidate_theme") or ""))
-        adjacent = [
-            self._clean_resolved_goal(str(item))
-            for item in (decision.get("adjacent_concepts") or [])
-            if str(item).strip()
-        ][:4]
-        if not theme:
-            question = decision.get("question") or self._fallback_goal_clarification()
-            return str(question).strip()
-        self.pending_goal_theme = theme
-        self.pending_goal_adjacent = adjacent
-        adjacent_text = self._format_adjacent(adjacent)
-        if adjacent_text:
-            return (
-                f"It sounds like the center might be {theme}. "
-                f"That could include {adjacent_text}. Is that the right center, or would you frame it differently?"
-            )
-        return f"It sounds like the center might be {theme}. Is that the right center, or would you frame it differently?"
-
-    @staticmethod
-    def _format_adjacent(items: list[str]) -> str:
-        if not items:
-            return ""
-        if len(items) == 1:
-            return items[0]
-        if len(items) == 2:
-            return f"{items[0]} and {items[1]}"
-        return f"{', '.join(items[:-1])}, and {items[-1]}"
-
-    @staticmethod
-    def _clean_resolved_goal(goal: str) -> str:
-        cleaned = " ".join(goal.split()).strip(" .")
-        stray_suffixes = (" Both", " both")
-        for suffix in stray_suffixes:
-            if cleaned.endswith(suffix):
-                cleaned = cleaned[: -len(suffix)].strip(" .")
-        return cleaned
-
-    def _valid_resolved_goal(self, goal: str) -> bool:
-        if not goal:
-            return False
-        lowered = goal.lower()
-        if "user:" in lowered or "assistant:" in lowered:
-            return False
-        return True
-
-    @staticmethod
-    def _is_goal_confirmation(text: str) -> bool:
-        normalized = normalize_identifier(text)
-        return normalized in {
-            "yes",
-            "y",
-            "yep",
-            "yeah",
-            "correct",
-            "sounds_good",
-            "looks_good",
-            "create_it",
-            "make_it",
-            "confirm",
-            "confirmed",
-            "go_ahead",
-            "do_it",
-        }
 
     def create_goal(self, target: str) -> str:
         self._close_active_question_session(status="answered")
@@ -444,7 +214,7 @@ class LearningSession:
                 goal_id=self.active_goal_id,
                 metadata={"resumed_from_duplicate_request": target},
             )
-            self._reset_brain()
+            self._reset_conversation()
             self._apply_goal_context()
             item = self.sql_db.get_current_syllabus_item(self.active_goal_id)
             if item:
@@ -473,7 +243,7 @@ class LearningSession:
             goal_id=goal_id,
             metadata={"target": target},
         )
-        self._reset_brain()
+        self._reset_conversation()
         self._apply_goal_context()
         first_item = self.sql_db.get_current_syllabus_item(goal_id)
         if first_item:
@@ -515,7 +285,7 @@ class LearningSession:
             session_type="goal",
             goal_id=self.active_goal_id,
         )
-        self._reset_brain()
+        self._reset_conversation()
         self._apply_goal_context()
         item = self.sql_db.get_current_syllabus_item(self.active_goal_id)
         if item:
@@ -529,7 +299,7 @@ class LearningSession:
 
     def ask(self, question: str) -> str:
         if self.mode != "question" or not self.active_session_id:
-            self._reset_brain()
+            self._reset_conversation()
             self.mode = "question"
             self.active_goal_id = None
             self.active_syllabus_item_id = None
@@ -539,13 +309,13 @@ class LearningSession:
                 metadata={"question": question},
             )
         context = self._build_question_context(question)
-        self.brain.state_prompt = context
+        self.teacher_context = context
         self.vector_db.log_ask(
             question,
             session_id=abs(hash(self.active_session_id)) % (10**12),
             user_id=self.user_id,
         )
-        response = "\n\n".join(self.brain.respond(question))
+        response = "\n\n".join(self._respond(question))
         self._maybe_link_question_to_goal(question)
         conversation_path = self._write_conversation()
         if self.active_session_id:
@@ -613,16 +383,12 @@ class LearningSession:
             topic_update_notes=topic_update_notes,
             graph_changes=graph_changes,
         )
-        self._reset_brain()
+        self._reset_conversation()
         self.mode = "idle"
         self.active_session_id = None
         self.active_goal_id = None
         self.active_syllabus_item_id = None
-        self.goal_intake = []
-        self.goal_intake_transcript = []
-        self.pending_goal_theme = None
-        self.pending_goal_adjacent = []
-        self.pending_resolved_goal = None
+        self.goal_intake_flow.clear()
         return report
 
     def save_partial(self, close_status: str | None = None) -> str:
@@ -650,7 +416,7 @@ class LearningSession:
 
     def _write_conversation(self) -> str:
         filename = f"{self.user_id}-{datetime.now().isoformat(timespec='seconds').replace(':', '-')}"
-        self.brain.convo.save(filename)
+        self.conversation.save(filename)
         return str(Path("data/conversations") / f"{filename}.json")
 
     def render_goals(self) -> str:
@@ -718,11 +484,16 @@ class LearningSession:
 
     def _goal_turn(self, text: str) -> str:
         self._apply_goal_context()
-        return "\n\n".join(self.brain.respond(text))
+        return "\n\n".join(self._respond(text))
 
-    def _reset_brain(self):
-        self.brain = ConversationBrain()
-        self.brain.agent = self.agent
+    def _reset_conversation(self):
+        self.conversation = Conversation()
+        self.teacher_context = ""
+
+    def _respond(self, user_message: str):
+        self.conversation.append_user(user_message)
+        dynamic_prompts = [self.teacher_context] if self.teacher_context else []
+        yield from self.stream_task(self.teacher_task, self.conversation, dynamic_prompts=dynamic_prompts)
 
     def _generate_syllabus(self, target: str) -> dict:
         packet = (
@@ -818,7 +589,7 @@ class LearningSession:
             for item in items
         )
         memories = self._query_memories(goal["target"])
-        self.brain.state_prompt = (
+        self.teacher_context = (
             f"User profile:\n{self.profile}\n\n"
             f"Active long-term goal:\n{goal['title']}\n"
             f"Target topic: {goal.get('target_topic_id')}\n"
@@ -905,12 +676,12 @@ class LearningSession:
 
     def _finalize_updates(self) -> dict:
         try:
-            result = self.brain.run_task_json(self.finalization_task, visible=False)
+            result = self.run_task_json(self.finalization_task, self.conversation, visible=False)
         except Exception:
             result = {}
         if not isinstance(result, dict):
             result = {}
-        visible = list(self.brain.convo.visible_messages())
+        visible = list(self.conversation.visible_messages())
         last_user = next((msg.content for msg in reversed(visible) if msg.role == "user"), "")
         result.setdefault("summary", f"worked on {self.active_topic_id or 'a learning question'}")
         result.setdefault("next_step", "continue from the last question")

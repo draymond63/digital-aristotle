@@ -1,12 +1,10 @@
 import json
 import os
 import dotenv
-from abc import ABC, abstractmethod
 from dataclasses import dataclass, asdict, field
 from typing import Generator, Literal, get_args
 from ollama import Client
 from openai import OpenAI
-from datetime import datetime
 
 
 RoleType = Literal["user", "system", "assistant"]
@@ -362,108 +360,3 @@ def get_control_model():
     if os.getenv("USE_API") is not None:
         return API_TEACHER_MODEL
     return LOCAL_CONTROL_MODEL
-
-
-
-class Brain(ABC):
-    """Base class for stateful task-driven conversation loops."""
-
-    def __init__(self, messages: list[LogEntry] | None = None):
-        self.agent = Agent()
-        self.convo = Conversation(messages)
-        self.__post_init__()
-    
-    def __post_init__(self):
-        pass
-
-    @abstractmethod
-    def respond(self, user_message: str) -> Generator[str, None, None]:
-        pass
-
-    def chat_local(self):
-        while True:
-            message = input("\nUser: ")
-            if message == "":
-                break
-            list(self.respond(message))
-        self.save()
-
-    def add_usr_msg(self, user_message):
-        self.convo.append_user(user_message)
-
-    def run_task(
-        self,
-        task: Task,
-        conversation: Conversation | None = None,
-        dynamic_prompts: list[str] | None = None,
-        packet: str | None = None,
-        visible: bool = True,
-    ) -> str:
-        conversation = conversation or self.convo
-        dynamic_prompts = dynamic_prompts or []
-        input_messages = self.agent.build_task_messages(task, conversation, dynamic_prompts, packet)
-        content = self.agent.run_task(task, conversation, dynamic_prompts, packet)
-        self.convo.append_task_result(
-            task,
-            content,
-            visible=visible,
-            dynamic_prompts=dynamic_prompts,
-            input_messages=input_messages,
-        )
-        return content
-
-    def run_task_json(
-        self,
-        task: Task,
-        conversation: Conversation | None = None,
-        dynamic_prompts: list[str] | None = None,
-        packet: str | None = None,
-        visible: bool = False,
-    ) -> dict | list:
-        conversation = conversation or self.convo
-        dynamic_prompts = dynamic_prompts or []
-        input_messages = self.agent.build_task_messages(task, conversation, dynamic_prompts, packet)
-        result = self.agent.run_task_json(task, conversation, dynamic_prompts, packet)
-        self.convo.append_task_result(
-            task,
-            json.dumps(result),
-            visible=visible,
-            dynamic_prompts=dynamic_prompts,
-            input_messages=input_messages,
-        )
-        return result
-
-    def stream_task(
-        self,
-        task: Task,
-        conversation: Conversation | None = None,
-        dynamic_prompts: list[str] | None = None,
-        packet: str | None = None,
-        visible: bool = True,
-    ):
-        conversation = conversation or self.convo
-        dynamic_prompts = dynamic_prompts or []
-        input_messages = self.agent.build_task_messages(task, conversation, dynamic_prompts, packet)
-        response = ""
-        for content in self.agent.stream_task(task, conversation, dynamic_prompts, packet):
-            response = f"{response}\n\n{content}" if response else content
-            yield content
-        if response:
-            self.convo.append_task_result(
-                task,
-                response,
-                visible=visible,
-                dynamic_prompts=dynamic_prompts,
-                input_messages=input_messages,
-            )
-
-    def save(self):
-        filename = datetime.now().isoformat(timespec="seconds").replace(":", "-")
-        self.convo.save(filename)
-
-    @property
-    def num_messages(self):
-        return len(self.convo)
-
-    def set_convo(self, convo: Conversation):
-        self.convo = convo
