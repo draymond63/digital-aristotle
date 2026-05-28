@@ -93,3 +93,23 @@ in `.env` to choose OpenAI; comment it out to use Ollama. See `ollama.md` for th
 current local and OpenAI setup notes.
 
 - Version controlled data with AI controlled git repo
+
+# Telegram
+
+The Telegram interface uses the same `LearningSession` controller as the CLI.
+
+Set these in `.env`:
+
+```
+TELEGRAM_KEY=123456:bot-token
+TELEGRAM_ALLOWED_IDS=123456789,987654321
+```
+
+Run it with:
+
+```
+python src/interface/text_chat.py
+```
+
+Profiles are stored as `telegram_<telegram_user_id>`. Refused users are appended to
+`data/telegram_attempted_usage.jsonl`, which is intentionally ignored by git.

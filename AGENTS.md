@@ -25,7 +25,7 @@ This is an exploratory AI tutor/guide. It helps a user learn things they are cur
 
 ## Editing
 
-- Use ~/.virtualenvs/teacher/ as the 
+- Use ~/.virtualenvs/teacher/ as the venv
 - Never attempt to preserve old functionality if its design is incompatible
 - Always delete uselss code, but let the user know
 - Preferred cleaner, less-developed features over bloated ones. This is an experimental repo

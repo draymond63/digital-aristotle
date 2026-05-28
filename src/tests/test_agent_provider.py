@@ -1,13 +1,6 @@
-from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 import os
-import sys
-
-
-ROOT = Path(__file__).resolve().parents[2]
-SRC = ROOT / "src"
-sys.path.insert(0, str(SRC))
 
 from brains.comms.agent_base import Agent, Conversation, Task, get_control_model, get_teacher_model
 

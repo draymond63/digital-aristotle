@@ -1,41 +1,45 @@
 from brains.comms.agent_base import Brain, Task, Conversation, get_control_model
 from brains.comms.prompts_onboarder import *
 from brains.data.profile import Profile
+from brains.data.profile import normalize_identifier
 
 
 
 class OnboardingBrain(Brain):
     user_dimensions = {
         "curiosity_anchor": (
-            "what the learner is curious about right now. "
-            "Good question shape: What is something you have been curious about lately, even if it feels random, vague, or hard to explain?"
+            "what the learner wants to explore first, or whether they need help finding a starting point."
         ),
         "background": (
-            "the learner's informal education level, fields, or prior experience that should guide teaching assumptions. "
-            "Good question shape: What background should I know about you: school level, work experience, fields you know well, or things you are comfortable assuming?"
-        ),
-        "starting_point": (
-            "what the learner already knows and where the exploration should begin. "
-            "Good question shape: For that topic, should we start from brand new, the basics, something you have explored a bit, or somewhere deeper?"
+            "the learner's informal education level, fields, or prior experience that should guide teaching assumptions."
         ),
         "learning_texture": (
-            "what kinds of explanations or activities help things click. "
-            "Good question shape: When learning something new, what usually helps it click: examples, stories, visuals, analogies, hands-on projects, big-picture maps, or discussion?"
-        ),
-        "desired_outcome": (
-            "what would make the first session feel worthwhile. "
-            "Good question shape: By the end of a good exploration, what would you like to walk away with: a clear explanation, a mental model, something made, next questions, a practical skill, or a surprising insight?"
-        ),
-        "avoid": (
-            "what makes learning feel boring, frustrating, or too much like school. "
-            "Good question shape: What should I avoid so this does not feel like school: jargon, long lectures, quizzes, homework, going too slowly, going too fast, too much theory, or too few examples?"
+            "how the learner wants explanations to feel, what outcomes are useful, and what to avoid."
         ),
     }
+    question_text = {
+        "curiosity_anchor": (
+            "What would you like to explore first? It can be a topic, a vague curiosity, "
+            "or you can say you are not sure and I will help find a starting point."
+        ),
+        "background": (
+            "What should I know about your background so I do not explain things at the wrong level?"
+        ),
+        "learning_texture": (
+            "How should learning with me feel? For example: intuitive, hands-on, visual, rigorous, "
+            "project-based, no jargon, no long lectures, or something else."
+        ),
+    }
+    unsure_prompt = (
+        "Totally fine. We can finish setup without picking a topic, and you can ask or start a goal later."
+    )
     questions_per_dimension = 1
 
     def __init__(self, username: str = "daniel", messages=None):
         self.username = username
         self.profile_seed = None
+        self.helped_find_curiosity = False
+        self.curiosity_answer = None
         super().__init__(messages)
 
     def __post_init__(self):
@@ -63,7 +67,7 @@ class OnboardingBrain(Brain):
             visible_history=8,
             output_format="json",
             temperature=0.0,
-            num_predict=180,
+            num_predict=360,
         )
         self.complete_task = Task(
             "onboarding_complete",
@@ -82,7 +86,7 @@ class OnboardingBrain(Brain):
             visible_history=None,
             output_format="json",
             temperature=0.0,
-            num_predict=360,
+            num_predict=700,
         )
         self.dimensions_to_cover = list(self.user_dimensions.items())
         self.field_index = 0
@@ -100,7 +104,29 @@ class OnboardingBrain(Brain):
         yield from self.ask_current_question()
 
     def respond(self, user_message: str):
+        if self.profile_seed is not None:
+            yield "You are set up. Ask me anything, or turn something into a longer goal when it feels worth tracking."
+            return
+
         self.add_usr_msg(user_message)
+
+        if self.current_dimension[0] == "curiosity_anchor" and self._is_uncertain_curiosity(user_message):
+            self.helped_find_curiosity = True
+            self.curiosity_answer = None
+            yield from self._emit_onboarding_message(self.unsure_prompt)
+            yield from self.advance_field()
+            return
+
+        if (
+            self.current_dimension[0] == "curiosity_anchor"
+            and not self._is_uncertain_curiosity(user_message)
+            and not self._looks_like_curiosity(user_message)
+        ):
+            yield from self.ask_current_question()
+            return
+
+        if self.current_dimension[0] == "curiosity_anchor" and self._looks_like_curiosity(user_message):
+            self.curiosity_answer = user_message.strip()
 
         self.turns_in_field += 1
         if self.turns_in_field >= self.questions_per_dimension:
@@ -111,12 +137,8 @@ class OnboardingBrain(Brain):
         yield from self.ask_current_question()
 
     def ask_current_question(self):
-        print("Responding...")
-        yield from self.stream_task(
-            self.ask_task,
-            self.current_section(),
-            dynamic_prompts=[self.current_field_prompt()],
-        )
+        dimension, _ = self.current_dimension
+        yield from self._emit_onboarding_message(self.question_text[dimension])
 
     def evaluate_section(self):
         result = self.run_task_json(
@@ -124,26 +146,17 @@ class OnboardingBrain(Brain):
             self.current_section(),
             dynamic_prompts=[self.current_field_prompt()],
         )
-        print(result)
-        # TODO: Update state?
+        return result
 
     def advance_field(self):
         if self.field_index + 1 >= len(self.dimensions_to_cover):
             yield from self.complete_onboarding()
             return
 
-        previous_section = self.current_section()
         self.field_index += 1
         self.turns_in_field = 0
-        dimension, meaning = self.current_dimension
-        packet = self._transition_packet(previous_section, dimension, meaning)
         self.field_start_index = len(self.convo)
-        yield from self.stream_task(
-            self.transition_task,
-            Conversation(),
-            dynamic_prompts=[self.current_field_prompt()],
-            packet=packet,
-        )
+        yield from self.ask_current_question()
 
     def transition_to_next_topic(self):
         yield from self.advance_field()
@@ -173,6 +186,53 @@ class OnboardingBrain(Brain):
     def current_field_prompt(self):
         dimension, meaning = self.current_dimension
         return ASSESSMENT_TRANSITION_PROMPT(dimension, meaning)
+
+    def first_curiosity_answer(self) -> str | None:
+        return self.curiosity_answer
+
+    def _emit_onboarding_message(self, text: str):
+        self.convo.append_task_result(self.ask_task, text)
+        yield text
+
+    @staticmethod
+    def _is_uncertain_curiosity(user_message: str) -> bool:
+        normalized = normalize_identifier(user_message)
+        uncertain_phrases = (
+            "i_don_t_know",
+            "dont_know",
+            "not_sure",
+            "no_idea",
+            "unsure",
+            "nothing_in_mind",
+            "no_clue",
+            "you_choose",
+            "surprise_me",
+        )
+        return any(phrase in normalized for phrase in uncertain_phrases)
+
+    @classmethod
+    def _looks_like_curiosity(cls, user_message: str) -> bool:
+        normalized = normalize_identifier(user_message)
+        if not normalized or cls._is_uncertain_curiosity(user_message):
+            return False
+        non_curiosity_starts = {
+            "hi",
+            "hello",
+            "hey",
+            "yo",
+            "sup",
+            "start",
+            "lets_start",
+            "let_s_start",
+            "ok",
+            "okay",
+            "sure",
+            "yes",
+            "yep",
+        }
+        if normalized in non_curiosity_starts:
+            return False
+        return len(normalized) >= 8
 
     def prepopulate_profile(self):
         seed = self.run_task_json(

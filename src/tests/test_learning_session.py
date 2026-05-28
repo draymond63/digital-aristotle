@@ -1,13 +1,8 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
+import threading
 from types import SimpleNamespace
 import os
-import sys
-
-
-ROOT = Path(__file__).resolve().parents[2]
-SRC = ROOT / "src"
-sys.path.insert(0, str(SRC))
 
 from brains.comms.agent_base import Conversation
 from brains.data.db_sql import SQLDatabase
@@ -19,15 +14,17 @@ class FakeVectorDB:
     def __init__(self):
         self.added = []
         self.asks = []
+        self.queries = []
 
-    def log_ask(self, msg, session_id):
-        self.asks.append((msg, session_id))
+    def log_ask(self, msg, session_id, user_id=None):
+        self.asks.append((msg, session_id, user_id))
 
     def query_pretty(self, *args, **kwargs):
+        self.queries.append((args, kwargs))
         return ""
 
-    def add(self, collection_name, ids, documents):
-        self.added.append((collection_name, ids, documents))
+    def add(self, collection_name, ids, documents, metadatas=None):
+        self.added.append((collection_name, ids, documents, metadatas))
 
 
 class FakeAgent:
@@ -35,6 +32,20 @@ class FakeAgent:
         self.finalized = False
 
     def run_task_json(self, task, conversation, dynamic_prompts=None, packet=None):
+        if task.name == "goal_intake":
+            if packet and packet.count("User:") >= 2:
+                return {
+                    "status": "ready",
+                    "question": "",
+                    "resolved_goal": "learn Kalman filters from a controls intuition perspective",
+                    "rationale": "The learner clarified the angle.",
+                }
+            return {
+                "status": "clarify",
+                "question": "What angle should this goal take: intuition, math, or implementation?",
+                "resolved_goal": "",
+                "rationale": "The initial goal is broad.",
+            }
         if task.name == "syllabus_planner":
             return {
                 "title": "Kalman Filters",
@@ -127,6 +138,14 @@ def make_session(tmpdir: Path):
     )
 
 
+def create_kalman_goal(session: LearningSession):
+    first = session.handle("/goal learn Kalman filters")
+    assert "What angle" in first.text
+    proposed = session.handle("controls intuition")
+    assert "Reply yes to create it" in proposed.text
+    return session.handle("yes")
+
+
 def test_schema_is_idempotent():
     with TemporaryDirectory() as dirname:
         path = Path(dirname) / "data" / "test.db"
@@ -138,12 +157,28 @@ def test_schema_is_idempotent():
         db.close()
 
 
+def test_sql_database_can_be_used_from_worker_thread():
+    with TemporaryDirectory() as dirname:
+        db = SQLDatabase(Path(dirname) / "data" / "test.db")
+        db.create_learning_goal("tester", "Kalman Filters", "learn Kalman filters", "kalman_filter")
+        result = []
+
+        def query_goal():
+            result.append(db.get_recent_active_goal("tester")["title"])
+
+        thread = threading.Thread(target=query_goal)
+        thread.start()
+        thread.join()
+        assert result == ["Kalman Filters"]
+        db.close()
+
+
 def test_goal_lifecycle_and_finalization():
     with TemporaryDirectory() as dirname:
         old_cwd = Path.cwd()
         try:
             session = make_session(Path(dirname))
-            created = session.handle("/goal learn Kalman filters")
+            created = create_kalman_goal(session)
             assert "Created learning goal: Kalman Filters" in created.text
             assert "Syllabus:" in created.text
             assert session.active_goal_id is not None
@@ -158,6 +193,55 @@ def test_goal_lifecycle_and_finalization():
             assert "Audit log:" in report
             assert "kalman_filter" in session.profile.topics
             assert session.vector_db.added
+            assert session.vector_db.added[0][3][0]["user_id"] == "tester"
+            assert session.vector_db.added[0][3][0]["topic_id"] == "kalman_filter"
+            session.sql_db.close()
+        finally:
+            os.chdir(old_cwd)
+
+
+def test_goal_creation_clarifies_before_creating_syllabus():
+    with TemporaryDirectory() as dirname:
+        old_cwd = Path.cwd()
+        try:
+            session = make_session(Path(dirname))
+            first = session.handle("/goal learn Kalman filters")
+            assert "What angle" in first.text
+            assert session.mode == "goal_intake"
+            assert session.sql_db.get_active_goals("tester") == []
+
+            proposed = session.handle("controls intuition")
+            assert "Here is the goal I would create" in proposed.text
+            assert session.mode == "goal_confirm"
+            assert session.sql_db.get_active_goals("tester") == []
+
+            created = session.handle("yes")
+            assert "Created learning goal: Kalman Filters" in created.text
+            assert session.mode == "goal"
+            assert len(session.sql_db.get_active_goals("tester")) == 1
+            session.sql_db.close()
+        finally:
+            os.chdir(old_cwd)
+
+
+def test_goal_confirmation_can_be_revised_before_creation():
+    with TemporaryDirectory() as dirname:
+        old_cwd = Path.cwd()
+        try:
+            session = make_session(Path(dirname))
+            session.handle("/goal learn Kalman filters")
+            proposal = session.handle("controls intuition")
+            assert "Reply yes" in proposal.text
+            assert session.mode == "goal_confirm"
+
+            revised = session.handle("make it implementation focused instead")
+            assert "Here is the goal I would create" in revised.text
+            assert session.mode == "goal_confirm"
+            assert session.sql_db.get_active_goals("tester") == []
+
+            created = session.handle("yes")
+            assert "Created learning goal" in created.text
+            assert len(session.sql_db.get_active_goals("tester")) == 1
             session.sql_db.close()
         finally:
             os.chdir(old_cwd)
@@ -170,6 +254,15 @@ def test_one_off_question_does_not_create_goal():
             session = make_session(Path(dirname))
             response = session.handle("/ask what is covariance?")
             assert "prediction and correction" in response.text.lower()
+            assert session.vector_db.asks[0][2] == "tester"
+            queried_collections = {kwargs["collection_name"] for _, kwargs in session.vector_db.queries}
+            assert queried_collections == {
+                "insights",
+                "confusions",
+                "successful_explanations",
+                "learning_preferences",
+            }
+            assert all(kwargs["user_id"] == "tester" for _, kwargs in session.vector_db.queries)
             assert session.sql_db.get_active_goals("tester") == []
             assert session.mode == "question"
             session.sql_db.cursor.execute(
@@ -201,7 +294,7 @@ def test_one_off_question_followups_share_open_session_until_switch():
             assert row["status"] == "active"
             assert row["conversation_path"]
 
-            session.handle("/goal learn Kalman filters")
+            create_kalman_goal(session)
             session.sql_db.cursor.execute(
                 "SELECT status FROM goal_sessions WHERE id = ?",
                 (first_session_id,),
@@ -218,7 +311,7 @@ def test_continue_resumes_recent_goal():
         old_cwd = Path.cwd()
         try:
             session = make_session(Path(dirname))
-            session.handle("/goal learn Kalman filters")
+            create_kalman_goal(session)
             profile_text = session.handle("/profile").text
             assert "Profile for tester" in profile_text
             assert "Learning frontier" in profile_text
@@ -242,8 +335,10 @@ def test_duplicate_goal_resumes_existing_goal():
         old_cwd = Path.cwd()
         try:
             session = make_session(Path(dirname))
-            first = session.handle("/goal learn Kalman filters").text
-            second = session.handle("/goal learn Kalman filters").text
+            first = create_kalman_goal(session).text
+            session.handle("/goal learn Kalman filters")
+            session.handle("controls intuition")
+            second = session.handle("yes").text
             assert "Created learning goal" in first
             assert "already have this active goal" in second
             assert len(session.sql_db.get_active_goals("tester")) == 1
@@ -362,7 +457,10 @@ def test_graph_updates_skip_weak_invalid_and_self_edges():
 
 if __name__ == "__main__":
     test_schema_is_idempotent()
+    test_sql_database_can_be_used_from_worker_thread()
     test_goal_lifecycle_and_finalization()
+    test_goal_creation_clarifies_before_creating_syllabus()
+    test_goal_confirmation_can_be_revised_before_creation()
     test_one_off_question_does_not_create_goal()
     test_one_off_question_followups_share_open_session_until_switch()
     test_continue_resumes_recent_goal()

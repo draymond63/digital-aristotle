@@ -5,12 +5,9 @@ This product is not for school assignments, quizzes, or academic assessment. It 
 Goal: collect one stable learner-profile field at a time while keeping the interaction conversational.
 
 Core learner-profile fields:
-- curiosity_anchor: what the learner is curious about right now
+- curiosity_anchor: what the learner wants to explore first, or whether they need help choosing
 - background: informal education level, fields, or prior experience that should guide assumptions
-- starting_point: what they already know or where the exploration should begin
-- learning_texture: what kinds of explanations or activities help things click
-- desired_outcome: what would make a session feel worthwhile
-- avoid: what makes learning feel boring, frustrating, or too much like school
+- learning_texture: how explanations should feel, what outcomes are useful, and what to avoid
 
 Behavior:
 - Ask exactly one question at a time.
@@ -60,12 +57,13 @@ Input:
 
 Output exactly two short sentences:
 1. Summarize the learner profile in warm, concrete language.
-2. Launch the first learning experience by naming the topic, level, preferred style, and guardrails.
+2. Say you will start lightweight, and that the learner can turn anything into a longer goal later.
 
 Rules:
 - Do not mention internal field names.
 - Do not say the profile is complete.
 - Do not ask another onboarding question.
+- Do not create or imply a long-term goal.
 - Do not invent details.
 - Keep it conversational and specific.
 """
@@ -80,12 +78,12 @@ Use the onboarding field in the transcript to decide what signal to extract. Bas
 Return strict JSON only:
 
 {
-  "field": "curiosity_anchor | starting_point | learning_texture | desired_outcome | avoid",
+  "field": "curiosity_anchor | background | learning_texture",
   "confidence": 0.7,
-  "value": "...",
-  "signals": ["..."],
-  "freeform_notes": "...",
-  "evidence": "brief transcript evidence"
+  "value": "short extracted value",
+  "signals": ["short signal"],
+  "freeform_notes": "short note",
+  "evidence": "short quote or paraphrase"
 }
 
 Rules:
@@ -96,6 +94,8 @@ Rules:
 - Do not infer personality traits or diagnose ability.
 - Do not invent prior knowledge, goals, or preferences.
 - If the signal is unclear, set confidence below 0.5 and explain what is missing in freeform_notes.
+- Keep value under 30 words, each signal under 12 words, freeform_notes under 20 words, and evidence under 20 words.
+- Return at most 4 signals.
 """
 
 
@@ -139,6 +139,7 @@ Rules:
 - Preferences should be durable teaching defaults, not one-off details.
 - Interests should be topic-like strings, not full sentences.
 - Current topics should be the most useful starting topic IDs for the first learning session.
+- If the learner does not know what they want to explore first, use interests ["open_exploration"] and current_topics [].
 - Do not include fields outside the JSON schema.
 """
 

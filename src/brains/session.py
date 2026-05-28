@@ -9,6 +9,7 @@ import json
 from brains.comms.agent_base import Agent, Conversation, Task, get_control_model
 from brains.comms.converser import ConversationBrain
 from brains.comms.prompts_session import (
+    GOAL_INTAKE_PROMPT,
     QUESTION_GOAL_LINK_PROMPT,
     SESSION_FINALIZATION_PROMPT,
     SYLLABUS_PROMPT,
@@ -18,7 +19,7 @@ from brains.data.db_vector import Collection, SemanticDatabase
 from brains.data.profile import Profile, normalize_identifier
 
 
-SessionMode = Literal["idle", "goal", "question"]
+SessionMode = Literal["idle", "goal_intake", "goal_confirm", "goal", "question"]
 
 
 @dataclass
@@ -106,7 +107,18 @@ class LearningSession:
         self.active_session_id: str | None = None
         self.active_topic_id: str | None = None
         self.active_syllabus_item_id: str | None = None
+        self.goal_intake: list[str] = []
+        self.pending_resolved_goal: str | None = None
 
+        self.goal_intake_task = Task(
+            "goal_intake",
+            GOAL_INTAKE_PROMPT,
+            model=get_control_model(),
+            context_format="packet",
+            output_format="json",
+            temperature=0.1,
+            num_predict=220,
+        )
         self.syllabus_task = Task(
             "syllabus_planner",
             SYLLABUS_PROMPT,
@@ -156,6 +168,8 @@ class LearningSession:
             return CommandResult("")
         if text.startswith("/"):
             return self.handle_command(text)
+        if self.mode in {"goal_intake", "goal_confirm"}:
+            return CommandResult(self.continue_goal_intake(text))
         if self.mode == "goal" and self.active_goal_id:
             return CommandResult(self._goal_turn(text))
         return CommandResult(self.ask(text))
@@ -166,16 +180,18 @@ class LearningSession:
         arg = arg.strip()
         match command:
             case "/goal" | "/learn":
-                if not arg:
-                    return CommandResult("Tell me the topic or outcome: /goal understand Kalman filters")
-                return CommandResult(self.create_goal(arg))
+                return CommandResult(self.start_goal_intake(arg or None))
             case "/continue":
+                self.goal_intake = []
+                self.pending_resolved_goal = None
                 return CommandResult(self.continue_goal())
             case "/goals":
                 return CommandResult(self.render_goals())
             case "/ask":
                 if not arg:
                     return CommandResult("Ask it like this: /ask what is covariance?")
+                self.goal_intake = []
+                self.pending_resolved_goal = None
                 return CommandResult(self.ask(arg))
             case "/done":
                 return CommandResult(self.finalize().render())
@@ -193,6 +209,8 @@ class LearningSession:
                 self.active_session_id = None
                 self.active_topic_id = None
                 self.active_syllabus_item_id = None
+                self.goal_intake = []
+                self.pending_resolved_goal = None
                 return CommandResult(f"Saved the previous conversation to {path}\nFresh session ready.")
             case "/help":
                 return CommandResult(HELP_TEXT)
@@ -201,6 +219,90 @@ class LearningSession:
                 return CommandResult(f"Saved conversation to {path}", should_quit=True)
             case _:
                 return CommandResult(f"I do not know {command} yet.\n\n{HELP_TEXT}")
+
+    def start_goal_intake(self, initial_text: str | None = None) -> str:
+        self._close_active_question_session(status="answered")
+        self._reset_brain()
+        self.mode = "goal_intake"
+        self.active_goal_id = None
+        self.active_topic_id = None
+        self.active_syllabus_item_id = None
+        self.goal_intake = []
+        self.pending_resolved_goal = None
+        if not initial_text:
+            return (
+                "What do you want to learn?\n"
+                "A rough answer is fine. I will help sharpen it before making a goal."
+            )
+        return self.continue_goal_intake(initial_text)
+
+    def continue_goal_intake(self, text: str) -> str:
+        if self.mode == "goal_confirm":
+            if self._is_goal_confirmation(text):
+                resolved_goal = self.pending_resolved_goal or self._fallback_resolved_goal()
+                self.goal_intake = []
+                self.pending_resolved_goal = None
+                prefix = f"Great. I will make this the track: {resolved_goal}\n\n"
+                return prefix + self.create_goal(resolved_goal)
+            self.pending_resolved_goal = None
+            self.mode = "goal_intake"
+
+        self.goal_intake.append(text.strip())
+        decision = self._evaluate_goal_intake()
+        if decision.get("status") == "ready" and decision.get("resolved_goal"):
+            resolved_goal = decision["resolved_goal"].strip()
+            self.pending_resolved_goal = resolved_goal
+            self.mode = "goal_confirm"
+            return (
+                f"Here is the goal I would create:\n"
+                f"{resolved_goal}\n\n"
+                "Reply yes to create it, or tell me what to change."
+            )
+        question = decision.get("question") or self._fallback_goal_clarification()
+        return question.strip()
+
+    def _evaluate_goal_intake(self) -> dict:
+        packet = (
+            f"User profile:\n{self.profile}\n\n"
+            "Goal-intake conversation:\n"
+            + "\n".join(f"User: {message}" for message in self.goal_intake)
+        )
+        decision = self.agent.run_task_json(self.goal_intake_task, Conversation(), packet=packet)
+        if not isinstance(decision, dict):
+            return {"status": "clarify", "question": self._fallback_goal_clarification(), "resolved_goal": ""}
+        if len(self.goal_intake) >= 2 and decision.get("status") != "ready":
+            return {
+                "status": "ready",
+                "resolved_goal": self._fallback_resolved_goal(),
+                "question": "",
+                "rationale": "Resolved after clarification turn.",
+            }
+        return decision
+
+    def _fallback_goal_clarification(self) -> str:
+        return "What would you like to be able to do or understand with this?"
+
+    def _fallback_resolved_goal(self) -> str:
+        return " ".join(self.goal_intake).strip()
+
+    @staticmethod
+    def _is_goal_confirmation(text: str) -> bool:
+        normalized = normalize_identifier(text)
+        return normalized in {
+            "yes",
+            "y",
+            "yep",
+            "yeah",
+            "correct",
+            "sounds_good",
+            "looks_good",
+            "create_it",
+            "make_it",
+            "confirm",
+            "confirmed",
+            "go_ahead",
+            "do_it",
+        }
 
     def create_goal(self, target: str) -> str:
         self._close_active_question_session(status="answered")
@@ -314,7 +416,11 @@ class LearningSession:
             )
         context = self._build_question_context(question)
         self.brain.state_prompt = context
-        self.vector_db.log_ask(question, session_id=abs(hash(self.active_session_id)) % (10**12))
+        self.vector_db.log_ask(
+            question,
+            session_id=abs(hash(self.active_session_id)) % (10**12),
+            user_id=self.user_id,
+        )
         response = "\n\n".join(self.brain.respond(question))
         self._maybe_link_question_to_goal(question)
         conversation_path = self._write_conversation()
@@ -388,6 +494,8 @@ class LearningSession:
         self.active_session_id = None
         self.active_goal_id = None
         self.active_syllabus_item_id = None
+        self.goal_intake = []
+        self.pending_resolved_goal = None
         return report
 
     def save_partial(self, close_status: str | None = None) -> str:
@@ -612,9 +720,19 @@ class LearningSession:
 
     def _query_memories(self, query: str) -> str:
         parts = []
-        for collection in (Collection.INSIGHTS, Collection.CONFUSIONS, Collection.SUCCESSFUL_EXPLANATIONS):
+        for collection in (
+            Collection.INSIGHTS,
+            Collection.CONFUSIONS,
+            Collection.SUCCESSFUL_EXPLANATIONS,
+            Collection.LEARNING_PREFERENCES,
+        ):
             try:
-                text = self.vector_db.query_pretty(collection_name=collection, query_texts=[query], n_results=3)
+                text = self.vector_db.query_pretty(
+                    collection_name=collection,
+                    query_texts=[query],
+                    n_results=3,
+                    user_id=self.user_id,
+                )
             except Exception:
                 text = ""
             if text:
@@ -761,7 +879,19 @@ class LearningSession:
             }.get(memory_type, Collection.INSIGHTS)
             memory_id = f"{self.active_session_id or 'session'}-{saved}"
             try:
-                self.vector_db.add(collection, ids=[memory_id], documents=[text])
+                self.vector_db.add(
+                    collection,
+                    ids=[memory_id],
+                    documents=[text],
+                    metadatas=[
+                        {
+                            "user_id": self.user_id,
+                            "session_id": self.active_session_id or "",
+                            "topic_id": normalize_identifier(memory.get("topic_id", "")),
+                            "memory_type": memory_type,
+                        }
+                    ],
+                )
                 saved += 1
             except Exception:
                 continue

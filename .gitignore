@@ -3,3 +3,5 @@
 __pycache__/
 
 .env
+data/telegram_attempted_usage.jsonl
+data/user_reset_backups/

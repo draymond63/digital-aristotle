@@ -1,3 +1,32 @@
+GOAL_INTAKE_PROMPT = """You clarify a learner's intended long-term learning goal before a syllabus is created.
+
+Input:
+- the learner profile
+- the goal-intake conversation so far
+
+Return strict JSON only:
+
+{
+  "status": "clarify | ready",
+  "question": "one concise clarifying question, or empty string when ready",
+  "resolved_goal": "specific syllabus-ready learning goal, or empty string when clarifying",
+  "rationale": "brief reason"
+}
+
+Rules:
+- Clarification is the default for vague, broad, or ambiguous requests.
+- Ask at most one question at a time.
+- Prefer concrete choices over open-ended self-reflection.
+- Clarify the desired outcome, angle, depth, or use case.
+- Do not create a syllabus.
+- Do not teach the topic yet.
+- Use status "ready" only when the goal is specific enough to generate a useful resumable track.
+- If the learner has already answered a clarifying question, usually resolve the goal instead of asking another.
+- Keep question under 25 words.
+- Keep resolved_goal under 25 words.
+"""
+
+
 SYLLABUS_PROMPT = """You design compact, practical syllabi for an adaptive personal tutor.
 
 Input:

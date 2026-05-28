@@ -3,9 +3,7 @@ from pathlib import Path
 import sys
 
 
-ROOT = Path(__file__).resolve().parents[2]
-SRC = ROOT / "src"
-sys.path.insert(0, str(SRC))
+ROOT = Path(__file__).resolve().parents[1]
 
 from brains.comms.converser import ConversationBrain
 from brains.data.profile import Profile

@@ -1,16 +1,13 @@
 from __future__ import annotations
 
 import shutil
-import sys
 from datetime import datetime
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SRC = ROOT / "src"
-sys.path.insert(0, str(SRC))
 
-from brains.data.db_sql import SQLDatabase  # noqa: E402
+from brains.data.db_sql import SQLDatabase
 
 
 DB_PATH = ROOT / "data" / "aristotle.db"

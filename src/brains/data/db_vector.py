@@ -15,27 +15,40 @@ class SemanticDatabase:
 
         self.client = PersistentClient(path=path)
 
-    def log_ask(self, msg: str, session_id: int):
+    def log_ask(self, msg: str, session_id: int, user_id: str | None = None):
         self.add(
             collection_name=Collection.PREVIOUS_ASKS,
             ids=[str(session_id)],
-            documents=[msg]
+            documents=[msg],
+            metadatas=[self._metadata(user_id=user_id)] if user_id else None,
         )
 
-    def find_asks(self, query: str, max_dist=0.5) -> list[str]:
+    def find_asks(self, query: str, max_dist=0.5, user_id: str | None = None) -> list[str]:
         response = self.query(
             collection_name=Collection.PREVIOUS_ASKS,
             query_texts=[query],
+            user_id=user_id,
         )
         docs = response["documents"][0]
         dists = response["distances"][0]
         return [doc for doc, dist in zip(docs, dists) if dist <= max_dist]
 
-    def add(self, collection_name: Collection, ids: list[str], documents: list[str]):
+    def add(
+        self,
+        collection_name: Collection,
+        ids: list[str],
+        documents: list[str],
+        metadatas: list[dict] | None = None,
+    ):
         collection = self.collection(collection_name)
-        collection.upsert(ids=ids, documents=documents)
+        kwargs = {"ids": ids, "documents": documents}
+        if metadatas is not None:
+            kwargs["metadatas"] = metadatas
+        collection.upsert(**kwargs)
 
-    def query_pretty(self, *args, max_dist=0.8, **kwargs):
+    def query_pretty(self, *args, max_dist=0.8, user_id: str | None = None, **kwargs):
+        if user_id:
+            kwargs["user_id"] = user_id
         response = self.query(*args, **kwargs)
         pretty = []
         results = [(doc, dist) for doc, dist in zip(response["documents"][0], response["distances"][0]) if dist <= max_dist]
@@ -45,13 +58,26 @@ class SemanticDatabase:
             pretty.append(f"{doc} (dist: {dist:3f})")
         return "\n".join(pretty)
 
-    def query(self, collection_name: Collection, query_texts: list[str], **kwargs):
+    def query(self, collection_name: Collection, query_texts: list[str], user_id: str | None = None, **kwargs):
         collection = self.collection(collection_name)
+        if user_id:
+            kwargs["where"] = self._user_where(user_id)
         results = collection.query(query_texts=query_texts, **kwargs)
         return results
 
     def collection(self, collection_name: Collection):
         return self.client.get_or_create_collection(name=collection_name.value)
+
+    @staticmethod
+    def _metadata(user_id: str | None = None, **kwargs):
+        metadata = {key: value for key, value in kwargs.items() if value is not None}
+        if user_id:
+            metadata["user_id"] = user_id
+        return metadata
+
+    @staticmethod
+    def _user_where(user_id: str):
+        return {"user_id": {"$eq": user_id}}
 
 
 def example():
