@@ -3,6 +3,7 @@ from pathlib import Path
 from yaml import safe_load, safe_dump
 from datetime import datetime
 from typing import Optional
+import shutil
 import re
 
 
@@ -44,8 +45,23 @@ class Profile:
 
     def save(self):
         data = self.to_dict()
+        self.filepath.parent.mkdir(parents=True, exist_ok=True)
         with open(self.filepath, "w", encoding="utf-8") as f:
             safe_dump(data, f, sort_keys=False)
+
+    def backup(self, backup_root: str | Path = "data/profile_backups") -> Path:
+        backup_root = Path(backup_root)
+        username = self.filepath.stem
+        backup_dir = backup_root / username
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().isoformat(timespec="seconds").replace(":", "-")
+        backup_path = backup_dir / f"{timestamp}.yaml"
+        if self.filepath.exists():
+            shutil.copy2(self.filepath, backup_path)
+        else:
+            with open(backup_path, "w", encoding="utf-8") as f:
+                safe_dump(self.to_dict(), f, sort_keys=False)
+        return backup_path
 
     @classmethod
     def load_user(cls, username: str):
@@ -117,6 +133,8 @@ class Profile:
         topic_id = normalize_identifier(topic_id)
         topic = self.topics.get(topic_id, TopicState())
         for key, value in kwargs.items():
+            if key in {"intuition", "details", "confidence"}:
+                value = max(0.0, min(1.0, float(value)))
             setattr(topic, key, value)
         topic.last_updated = datetime.now().isoformat(timespec="hours")
         self.topics[topic_id] = topic

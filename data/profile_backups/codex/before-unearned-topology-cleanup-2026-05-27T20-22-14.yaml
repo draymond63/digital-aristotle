@@ -1,0 +1,45 @@
+background: {}
+topics:
+  state_estimation:
+    intuition: 0.25
+    details: 0.25
+    confidence: 0.25
+    last_updated: 2026-05-27T19
+  vector_addition:
+    intuition: 0.25
+    details: 0.25
+    confidence: 0.25
+    last_updated: 2026-05-27T20
+  attention_mechanism:
+    intuition: 0.25
+    details: 0.1
+    confidence: 0.25
+    last_updated: 2026-05-27T20
+  control_systems_state_estimation:
+    intuition: 0.25
+    details: 0.25
+    confidence: 0.25
+    last_updated: 2026-05-27T20
+  vector_similarity_dot_product:
+    intuition: 0.25
+    details: 0.25
+    confidence: 0.25
+    last_updated: 2026-05-27T20
+  topology_continuous_deformation:
+    intuition: 0.3
+    details: 0.1
+    confidence: 0.3
+    last_updated: 2026-05-27T20
+  topology_holes_connectivity:
+    intuition: 0.2
+    details: 0.0
+    confidence: 0.2
+    last_updated: 2026-05-27T20
+  topology_homeomorphism:
+    intuition: 0.25
+    details: 0.25
+    confidence: 0.25
+    last_updated: 2026-05-27T20
+preferences: {}
+interests: []
+current_topics: []

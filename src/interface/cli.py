@@ -1,0 +1,64 @@
+import argparse
+from pathlib import Path
+import sys
+
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8")
+
+ROOT = Path(__file__).resolve().parents[2]
+SRC = ROOT / "src"
+if str(SRC) not in sys.path:
+    sys.path.insert(0, str(SRC))
+
+from brains.session import HELP_TEXT, LearningSession
+
+
+PROMPT = "\nYou: "
+
+
+def print_block(text: str):
+    if text:
+        print(text)
+
+
+def run_cli(user_id: str):
+    session = LearningSession(user_id=user_id)
+    print_block(session.startup_message())
+    print("\nType /help for commands.")
+
+    while True:
+        try:
+            message = input(PROMPT).strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            result = session.handle("/quit")
+            print_block(result.text)
+            break
+
+        if not message:
+            continue
+
+        result = session.handle(message)
+        print_block(result.text)
+        if result.should_quit:
+            break
+
+
+def main():
+    parser = argparse.ArgumentParser(description="AI Teacher CLI")
+    parser.add_argument("--user", default="daniel", help="Profile/user id to use")
+    parser.add_argument("--help-commands", action="store_true", help="Show in-chat commands and exit")
+    args = parser.parse_args()
+
+    if args.help_commands:
+        print(HELP_TEXT)
+        return
+
+    run_cli(args.user)
+
+
+if __name__ == "__main__":
+    main()

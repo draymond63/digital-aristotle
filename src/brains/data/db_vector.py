@@ -1,4 +1,3 @@
-from chromadb import PersistentClient
 from enum import StrEnum
 
 
@@ -6,10 +5,14 @@ class Collection(StrEnum):
     INSIGHTS = "insights"
     CONFUSIONS = "confusions"
     PREVIOUS_ASKS = "previous_asks"
+    SUCCESSFUL_EXPLANATIONS = "successful_explanations"
+    LEARNING_PREFERENCES = "learning_preferences"
 
 
 class SemanticDatabase:
     def __init__(self, path: str = "data/chroma"):
+        from chromadb import PersistentClient
+
         self.client = PersistentClient(path=path)
 
     def log_ask(self, msg: str, session_id: int):

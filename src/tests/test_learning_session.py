@@ -1,0 +1,374 @@
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from types import SimpleNamespace
+import os
+import sys
+
+
+ROOT = Path(__file__).resolve().parents[2]
+SRC = ROOT / "src"
+sys.path.insert(0, str(SRC))
+
+from brains.comms.agent_base import Conversation
+from brains.data.db_sql import SQLDatabase
+from brains.data.profile import Profile
+from brains.session import LearningSession
+
+
+class FakeVectorDB:
+    def __init__(self):
+        self.added = []
+        self.asks = []
+
+    def log_ask(self, msg, session_id):
+        self.asks.append((msg, session_id))
+
+    def query_pretty(self, *args, **kwargs):
+        return ""
+
+    def add(self, collection_name, ids, documents):
+        self.added.append((collection_name, ids, documents))
+
+
+class FakeAgent:
+    def __init__(self):
+        self.finalized = False
+
+    def run_task_json(self, task, conversation, dynamic_prompts=None, packet=None):
+        if task.name == "syllabus_planner":
+            return {
+                "title": "Kalman Filters",
+                "target_topic": "kalman_filter",
+                "milestones": [
+                    {"title": "Prediction and correction", "objective": "Understand the filter loop."},
+                    {"title": "Uncertainty", "objective": "Understand covariance and trust."},
+                    {"title": "Worked example", "objective": "Track position and velocity."},
+                ],
+            }
+        if task.name == "state_eval":
+            return {
+                "understanding": 0.2,
+                "confidence": 0.9,
+                "intent": "continue",
+                "evidence": "test",
+            }
+        if task.name == "session_finalizer":
+            self.finalized = True
+            return {
+                "summary": "prediction/correction and uncertainty became clearer",
+                "next_step": "connect covariance to position and velocity",
+                "topic_updates": [
+                    {
+                        "topic_id": "kalman_filter",
+                        "intuition": 0.4,
+                        "details": 0.1,
+                        "confidence": 0.5,
+                        "evidence": "The learner paraphrased prediction and correction.",
+                    }
+                ],
+                "memories": [
+                    {
+                        "type": "insight",
+                        "topic_id": "kalman_filter",
+                        "text": "Learner framed Kalman filtering as prediction then correction.",
+                        "confidence": 0.8,
+                    }
+                ],
+                "graph_updates": {
+                    "topics": [
+                        {
+                            "topic_id": "kalman_filter",
+                            "name": "Kalman Filter",
+                            "description": "Recursive estimator for noisy dynamic systems.",
+                            "confidence": 0.8,
+                            "evidence": "Session target was Kalman filters.",
+                        }
+                    ],
+                    "edges": [
+                        {
+                            "topic1": "covariance",
+                            "topic2": "kalman_filter",
+                            "relation_type": "prerequisite",
+                            "confidence": 0.7,
+                            "evidence": "The session discussed covariance as uncertainty tracking.",
+                        }
+                    ],
+                },
+            }
+        if task.name == "question_goal_linker":
+            return {"link": False, "goal_id": "", "confidence": 0.0, "evidence": "no"}
+        raise AssertionError(f"Unexpected JSON task: {task.name}")
+
+    def run_task(self, task, conversation, dynamic_prompts=None, packet=None):
+        if task.name == "teacher":
+            return "A Kalman filter alternates prediction and correction."
+        if task.name == "understanding_check":
+            return "If the measurement is noisy, should the estimate move more or less toward it?"
+        raise AssertionError(f"Unexpected text task: {task.name}")
+
+    def stream_task(self, task, conversation, dynamic_prompts=None, packet=None):
+        yield self.run_task(task, conversation, dynamic_prompts, packet)
+
+    def build_task_messages(self, task, conversation, dynamic_prompts=None, packet=None):
+        return [{"role": "system", "content": task.static_prompt}]
+
+
+def make_session(tmpdir: Path):
+    os.chdir(tmpdir)
+    (tmpdir / "data" / "profiles").mkdir(parents=True)
+    profile = Profile.load_user("tester")
+    db = SQLDatabase(tmpdir / "data" / "test.db")
+    return LearningSession(
+        user_id="tester",
+        sql_db=db,
+        vector_db=FakeVectorDB(),
+        profile=profile,
+        agent=FakeAgent(),
+    )
+
+
+def test_schema_is_idempotent():
+    with TemporaryDirectory() as dirname:
+        path = Path(dirname) / "data" / "test.db"
+        SQLDatabase(path).close()
+        SQLDatabase(path).close()
+        db = SQLDatabase(path)
+        db.cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='learning_goals'")
+        assert db.cursor.fetchone() is not None
+        db.close()
+
+
+def test_goal_lifecycle_and_finalization():
+    with TemporaryDirectory() as dirname:
+        old_cwd = Path.cwd()
+        try:
+            session = make_session(Path(dirname))
+            created = session.handle("/goal learn Kalman filters")
+            assert "Created learning goal: Kalman Filters" in created.text
+            assert "Syllabus:" in created.text
+            assert session.active_goal_id is not None
+
+            goals = session.handle("/goals").text
+            assert "Kalman Filters" in goals
+            assert "Prediction and correction" in goals
+
+            report = session.handle("/done").text
+            assert "Today you clarified: prediction/correction and uncertainty became clearer" in report
+            assert "Profile backup:" in report
+            assert "Audit log:" in report
+            assert "kalman_filter" in session.profile.topics
+            assert session.vector_db.added
+            session.sql_db.close()
+        finally:
+            os.chdir(old_cwd)
+
+
+def test_one_off_question_does_not_create_goal():
+    with TemporaryDirectory() as dirname:
+        old_cwd = Path.cwd()
+        try:
+            session = make_session(Path(dirname))
+            response = session.handle("/ask what is covariance?")
+            assert "prediction and correction" in response.text.lower()
+            assert session.sql_db.get_active_goals("tester") == []
+            assert session.mode == "question"
+            session.sql_db.cursor.execute(
+                "SELECT status, conversation_path FROM goal_sessions WHERE id = ?",
+                (session.active_session_id,),
+            )
+            row = session.sql_db.cursor.fetchone()
+            assert row["status"] == "active"
+            assert row["conversation_path"]
+            session.sql_db.close()
+        finally:
+            os.chdir(old_cwd)
+
+
+def test_one_off_question_followups_share_open_session_until_switch():
+    with TemporaryDirectory() as dirname:
+        old_cwd = Path.cwd()
+        try:
+            session = make_session(Path(dirname))
+            session.handle("/ask what is covariance?")
+            first_session_id = session.active_session_id
+            session.handle("Can you give me a geometric example?")
+            assert session.active_session_id == first_session_id
+            session.sql_db.cursor.execute(
+                "SELECT status, conversation_path FROM goal_sessions WHERE id = ?",
+                (first_session_id,),
+            )
+            row = session.sql_db.cursor.fetchone()
+            assert row["status"] == "active"
+            assert row["conversation_path"]
+
+            session.handle("/goal learn Kalman filters")
+            session.sql_db.cursor.execute(
+                "SELECT status FROM goal_sessions WHERE id = ?",
+                (first_session_id,),
+            )
+            assert session.sql_db.cursor.fetchone()["status"] == "answered"
+            assert session.mode == "goal"
+            session.sql_db.close()
+        finally:
+            os.chdir(old_cwd)
+
+
+def test_continue_resumes_recent_goal():
+    with TemporaryDirectory() as dirname:
+        old_cwd = Path.cwd()
+        try:
+            session = make_session(Path(dirname))
+            session.handle("/goal learn Kalman filters")
+            profile_text = session.handle("/profile").text
+            assert "Profile for tester" in profile_text
+            assert "Learning frontier" in profile_text
+            resumed = LearningSession(
+                user_id="tester",
+                sql_db=session.sql_db,
+                vector_db=FakeVectorDB(),
+                profile=session.profile,
+                agent=FakeAgent(),
+            )
+            result = resumed.handle("/continue").text
+            assert "Picking up: Kalman Filters" in result
+            assert "Prediction and correction" in result
+            resumed.sql_db.close()
+        finally:
+            os.chdir(old_cwd)
+
+
+def test_duplicate_goal_resumes_existing_goal():
+    with TemporaryDirectory() as dirname:
+        old_cwd = Path.cwd()
+        try:
+            session = make_session(Path(dirname))
+            first = session.handle("/goal learn Kalman filters").text
+            second = session.handle("/goal learn Kalman filters").text
+            assert "Created learning goal" in first
+            assert "already have this active goal" in second
+            assert len(session.sql_db.get_active_goals("tester")) == 1
+            session.sql_db.close()
+        finally:
+            os.chdir(old_cwd)
+
+
+def test_stale_question_sessions_are_abandoned_on_startup():
+    with TemporaryDirectory() as dirname:
+        old_cwd = Path.cwd()
+        try:
+            session = make_session(Path(dirname))
+            session.handle("/ask what is covariance?")
+            session.sql_db.cursor.execute(
+                "UPDATE goal_sessions SET status = 'active' WHERE id = ?",
+                (session.active_session_id,),
+            )
+            session.sql_db.conn.commit()
+            LearningSession(
+                user_id="tester",
+                sql_db=session.sql_db,
+                vector_db=FakeVectorDB(),
+                profile=session.profile,
+                agent=FakeAgent(),
+            )
+            session.sql_db.cursor.execute(
+                "SELECT status FROM goal_sessions WHERE id = ?",
+                (session.active_session_id,),
+            )
+            assert session.sql_db.cursor.fetchone()["status"] == "abandoned"
+            session.sql_db.close()
+        finally:
+            os.chdir(old_cwd)
+
+
+def test_topic_session_links_do_not_create_self_edges():
+    with TemporaryDirectory() as dirname:
+        db = SQLDatabase(Path(dirname) / "data" / "test.db")
+        db.connect_topic_to_session("session_1", ["Kalman filter"])
+        db.cursor.execute("SELECT * FROM topic_edges WHERE topic1 = topic2")
+        assert db.cursor.fetchall() == []
+        assert db.upsert_topic_edge("kalman_filter", "Kalman Filter", "related") is False
+        db.close()
+
+
+def test_topic_aliases_merge_and_resolve():
+    with TemporaryDirectory() as dirname:
+        db = SQLDatabase(Path(dirname) / "data" / "test.db")
+        db.upsert_topic("attention_mechanism", name="Attention Mechanism", aliases=["attention mechanisms"])
+        assert db.resolve_topic_id("Attention Mechanisms") == "attention_mechanism"
+        db.upsert_topic("attention mechanisms", name="Attention Mechanisms", aliases=["self attention"])
+        assert db.resolve_topic_id("self attention") == "attention_mechanism"
+        db.cursor.execute("SELECT COUNT(*) AS count FROM topics WHERE id LIKE 'attention%'")
+        assert db.cursor.fetchone()["count"] == 1
+        db.close()
+
+
+def test_graph_updates_skip_weak_invalid_and_self_edges():
+    with TemporaryDirectory() as dirname:
+        old_cwd = Path.cwd()
+        try:
+            session = make_session(Path(dirname))
+            changed = session._apply_graph_updates(
+                {
+                    "topics": [
+                        {
+                            "topic_id": "kalman_filter",
+                            "name": "Kalman Filter",
+                            "description": "Recursive estimator.",
+                            "confidence": 0.8,
+                            "evidence": "Session target.",
+                        },
+                        {
+                            "topic_id": "maybe_topic",
+                            "name": "Maybe Topic",
+                            "confidence": 0.2,
+                            "evidence": "Weak guess.",
+                        },
+                    ],
+                    "edges": [
+                        {
+                            "topic1": "kalman_filter",
+                            "topic2": "Kalman Filter",
+                            "relation_type": "related",
+                            "confidence": 0.9,
+                            "evidence": "Duplicate alias.",
+                        },
+                        {
+                            "topic1": "covariance",
+                            "topic2": "kalman_filter",
+                            "relation_type": "prerequisite",
+                            "confidence": 0.7,
+                            "evidence": "Covariance supports uncertainty tracking.",
+                        },
+                        {
+                            "topic1": "noise",
+                            "topic2": "kalman_filter",
+                            "relation_type": "made_up_relation",
+                            "confidence": 0.9,
+                            "evidence": "Invalid relation.",
+                        },
+                    ],
+                }
+            )
+            assert changed == 2
+            session.sql_db.cursor.execute("SELECT * FROM topic_edges")
+            rows = session.sql_db.cursor.fetchall()
+            assert len(rows) == 1
+            assert rows[0]["topic1"] == "covariance"
+            assert rows[0]["topic2"] == "kalman_filter"
+            session.sql_db.close()
+        finally:
+            os.chdir(old_cwd)
+
+
+if __name__ == "__main__":
+    test_schema_is_idempotent()
+    test_goal_lifecycle_and_finalization()
+    test_one_off_question_does_not_create_goal()
+    test_one_off_question_followups_share_open_session_until_switch()
+    test_continue_resumes_recent_goal()
+    test_duplicate_goal_resumes_existing_goal()
+    test_stale_question_sessions_are_abandoned_on_startup()
+    test_topic_session_links_do_not_create_self_edges()
+    test_topic_aliases_merge_and_resolve()
+    test_graph_updates_skip_weak_invalid_and_self_edges()
+    print("learning session tests passed")

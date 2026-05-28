@@ -66,6 +66,7 @@ class Conversation:
         self._entries = entries
 
     def save(self, filename: str):
+        os.makedirs("data/conversations", exist_ok=True)
         with open(f"data/conversations/{filename}.json", "w+", encoding="utf-8") as f:
             json.dump(self.json(full=True), f)
 
