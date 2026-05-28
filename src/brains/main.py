@@ -3,7 +3,7 @@ from enum import Enum
 from typing import Optional
 
 from brains.comms.converser import ConversationBrain
-from brains.comms.agent_base import Agent, Conversation, Task
+from brains.comms.agent_base import Agent, Conversation, Task, get_control_model
 from brains.comms.prompts_system import *
 from brains.data.db_sql import SQLDatabase
 from brains.data.db_vector import SemanticDatabase, Collection
@@ -59,6 +59,7 @@ class Aristotle:
         self.topic_id_task = Task(
             "topic_id",
             TOPIC_ID_PROMPT,
+            model=get_control_model(),
             context_format="packet",
             output_format="json",
             temperature=0.0,

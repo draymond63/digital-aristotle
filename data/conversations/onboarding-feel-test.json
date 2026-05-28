@@ -1,7 +1,7 @@
 [
     {
         "role": "assistant",
-        "content": "What topic have you found yourself curious about lately, even if it seems a bit random or hard to explain?",
+        "content": "What is something you've been curious about lately, even if it feels random, vague, or hard to explain?",
         "task_name": "onboarding_question",
         "visible": true,
         "dynamic_prompts": [
@@ -10,7 +10,7 @@
         "input_messages": [
             {
                 "role": "system",
-                "content": "You are an AI-guided onboarder for an exploratory learning system.\n\nThis product is not for school assignments, quizzes, or academic assessment. It helps curious people explore topics in ways that fit how they like to learn.\n\nGoal: collect one stable learner-profile field at a time while keeping the interaction conversational.\n\nCore learner-profile fields:\n- curiosity_anchor: what the learner is curious about right now\n- starting_point: what they already know or where the exploration should begin\n- learning_texture: what kinds of explanations or activities help things click\n- desired_outcome: what would make a session feel worthwhile\n- avoid: what makes learning feel boring, frustrating, or too much like school\n\nBehavior:\n- Ask exactly one question at a time.\n- Follow the current onboarding field from the system message.\n- Prefer inviting, concrete questions over vague self-reflection.\n- Offer a few lightweight examples or option chips when helpful.\n- Use at most one contextual follow-up for the current field.\n- If the user's previous answer already contains useful signal for this field, ask a sharper clarifying question rather than repeating the obvious.\n- Keep the exchange natural, concise, and efficient.\n- Do not praise, flatter, or add enthusiasm before the question.\n\nNever:\n- answer your own question\n- speak as the user\n- quiz or test the user\n- ask the user to rate themself numerically\n- diagnose personality traits\n- make the experience feel like school\n- add motivational filler\n"
+                "content": "You are an AI-guided onboarder for an exploratory learning system.\n\nThis product is not for school assignments, quizzes, or academic assessment. It helps curious people explore topics in ways that fit how they like to learn.\n\nGoal: collect one stable learner-profile field at a time while keeping the interaction conversational.\n\nCore learner-profile fields:\n- curiosity_anchor: what the learner is curious about right now\n- background: informal education level, fields, or prior experience that should guide assumptions\n- starting_point: what they already know or where the exploration should begin\n- learning_texture: what kinds of explanations or activities help things click\n- desired_outcome: what would make a session feel worthwhile\n- avoid: what makes learning feel boring, frustrating, or too much like school\n\nBehavior:\n- Ask exactly one question at a time.\n- Follow the current onboarding field from the system message.\n- Prefer inviting, concrete questions over vague self-reflection.\n- Offer a few lightweight examples or option chips when helpful.\n- Use at most one contextual follow-up for the current field.\n- If the user's previous answer already contains useful signal for this field, ask a sharper clarifying question rather than repeating the obvious.\n- Keep the exchange natural, concise, and efficient.\n- Do not praise, flatter, or add enthusiasm before the question.\n\nNever:\n- answer your own question\n- speak as the user\n- quiz or test the user\n- ask the user to rate themself numerically\n- diagnose personality traits\n- make the experience feel like school\n- add motivational filler\n"
             },
             {
                 "role": "system",
@@ -20,7 +20,7 @@
     },
     {
         "role": "user",
-        "content": "I'm interested in learning about advanced methods of statistics and modelling. I've learned about gaussian processes, RTS kalman filters, and other things that are useful to model real word physics given some underlying constraints plus an uncertainty",
+        "content": "I keep wondering how people make tiny games and simulations, especially the parts where simple rules create surprising behavior.",
         "task_name": null,
         "visible": true,
         "dynamic_prompts": [],
@@ -28,7 +28,7 @@
     },
     {
         "role": "assistant",
-        "content": "{\"field\": \"curiosity_anchor\", \"confidence\": 0.7, \"value\": \"...advanced methods of statistics and modelling...\", \"signals\": [\"advanced methods of statistics\", \"modelling\"], \"freeform_notes\": \"User mentions interest in advanced statistical methods, including specific examples like gaussian processes and RTS kalman filters.\", \"evidence\": \"I'm interested in learning about advanced methods of statistics and modelling. I've learned about gaussian processes, RTS kalman filters, and other things that are useful to model real word physics given some underlying constraints plus an uncertainty\"}",
+        "content": "{\"field\": \"curiosity_anchor\", \"value\": \"...\", \"signals\": [\"random\", \"vague\", \"hard to explain\"], \"freeform_notes\": \"The user's curiosity is about how people make games and simulations with simple rules.\", \"evidence\": \"I keep wondering how people make tiny games and simulations, especially the parts where simple rules create surprising behavior.\"}",
         "task_name": "onboarding_profile_extraction",
         "visible": false,
         "dynamic_prompts": [
@@ -45,13 +45,67 @@
             },
             {
                 "role": "user",
-                "content": "BEGIN TRANSCRIPT\nASSISTANT: What topic have you found yourself curious about lately, even if it seems a bit random or hard to explain?\n\nUSER: I'm interested in learning about advanced methods of statistics and modelling. I've learned about gaussian processes, RTS kalman filters, and other things that are useful to model real word physics given some underlying constraints plus an uncertainty\n\nEND TRANSCRIPT"
+                "content": "BEGIN TRANSCRIPT\nASSISTANT: What is something you've been curious about lately, even if it feels random, vague, or hard to explain?\n\nUSER: I keep wondering how people make tiny games and simulations, especially the parts where simple rules create surprising behavior.\n\nEND TRANSCRIPT"
             }
         ]
     },
     {
         "role": "assistant",
-        "content": "You've delved into advanced topics like Gaussian processes and RTS Kalman filters. For that topic, should we start from basics or go deeper?",
+        "content": "What is your formal education background, if any, and what types of work experience do you have that might be relevant here?",
+        "task_name": "onboarding_transition",
+        "visible": true,
+        "dynamic_prompts": [
+            "Onboarding field: background\nPurpose: learn the learner's informal education level, fields, or prior experience that should guide teaching assumptions. Good question shape: What background should I know about you: school level, work experience, fields you know well, or things you are comfortable assuming?.\nTask: ask the user one concise question that collects this field for an exploratory-learning profile.\nUse the suggested prompt shape if it fits, but adapt to the transcript naturally.\nDo not answer for the user."
+        ],
+        "input_messages": [
+            {
+                "role": "system",
+                "content": "You transition between onboarding fields.\n\nInput:\n- the completed field transcript\n- the next onboarding field\n\nOutput exactly two sentences:\n1. Briefly acknowledge the useful signal from the completed field.\n2. Ask one question for the next onboarding field.\n\nRules:\n- Ask exactly one question.\n- Do not answer for the user.\n- Do not mention internal field names.\n- Do not ask about the previous field again.\n- Use the transcript only for the closing sentence.\n- Keep it natural and concise.\n"
+            },
+            {
+                "role": "system",
+                "content": "Onboarding field: background\nPurpose: learn the learner's informal education level, fields, or prior experience that should guide teaching assumptions. Good question shape: What background should I know about you: school level, work experience, fields you know well, or things you are comfortable assuming?.\nTask: ask the user one concise question that collects this field for an exploratory-learning profile.\nUse the suggested prompt shape if it fits, but adapt to the transcript naturally.\nDo not answer for the user."
+            },
+            {
+                "role": "user",
+                "content": "Completed field transcript:\nASSISTANT: What is something you've been curious about lately, even if it feels random, vague, or hard to explain?\nUSER: I keep wondering how people make tiny games and simulations, especially the parts where simple rules create surprising behavior.\n\nNext onboarding field: background\nPurpose: learn the learner's informal education level, fields, or prior experience that should guide teaching assumptions. Good question shape: What background should I know about you: school level, work experience, fields you know well, or things you are comfortable assuming?.\nUse the transcript only to close the completed field.\nThe next question must collect the next field for an exploratory-learning profile.\nWrite exactly two sentences."
+            }
+        ]
+    },
+    {
+        "role": "user",
+        "content": "I studied some college math and I am comfortable with basic programming, especially a little Python.",
+        "task_name": null,
+        "visible": true,
+        "dynamic_prompts": [],
+        "input_messages": []
+    },
+    {
+        "role": "assistant",
+        "content": "{\"field\": \"background\", \"confidence\": 0.7, \"value\": \"formal education background (some college math) and work experience (basic programming, specifically Python)\", \"signals\": [\"formal education\", \"college math\", \"comfortable with basic programming\", \"specifically Python\"], \"freeform_notes\": \"The user mentions formal education in some college math and specific programming experience with Python.\", \"evidence\": \"I studied some college math and I am comfortable with basic programming, especially a little Python.\"}",
+        "task_name": "onboarding_profile_extraction",
+        "visible": false,
+        "dynamic_prompts": [
+            "Onboarding field: background\nPurpose: learn the learner's informal education level, fields, or prior experience that should guide teaching assumptions. Good question shape: What background should I know about you: school level, work experience, fields you know well, or things you are comfortable assuming?.\nTask: ask the user one concise question that collects this field for an exploratory-learning profile.\nUse the suggested prompt shape if it fits, but adapt to the transcript naturally.\nDo not answer for the user."
+        ],
+        "input_messages": [
+            {
+                "role": "system",
+                "content": "You are a profile extraction system.\n\nAnalyze the onboarding transcript only. Do not answer the user or continue the conversation.\n\nUse the onboarding field in the transcript to decide what signal to extract. Base every claim on evidence.\n\nReturn strict JSON only:\n\n{\n  \"field\": \"curiosity_anchor | starting_point | learning_texture | desired_outcome | avoid\",\n  \"confidence\": 0.7,\n  \"value\": \"...\",\n  \"signals\": [\"...\"],\n  \"freeform_notes\": \"...\",\n  \"evidence\": \"brief transcript evidence\"\n}\n\nRules:\n- Prefer fewer high-confidence observations.\n- Preserve the user's own phrasing when it is meaningful.\n- Extract from the user's answers, not from wording in the assistant questions.\n- Never use \"...\" as a value if the user gave a real answer.\n- Do not infer personality traits or diagnose ability.\n- Do not invent prior knowledge, goals, or preferences.\n- If the signal is unclear, set confidence below 0.5 and explain what is missing in freeform_notes.\n"
+            },
+            {
+                "role": "system",
+                "content": "Onboarding field: background\nPurpose: learn the learner's informal education level, fields, or prior experience that should guide teaching assumptions. Good question shape: What background should I know about you: school level, work experience, fields you know well, or things you are comfortable assuming?.\nTask: ask the user one concise question that collects this field for an exploratory-learning profile.\nUse the suggested prompt shape if it fits, but adapt to the transcript naturally.\nDo not answer for the user."
+            },
+            {
+                "role": "user",
+                "content": "BEGIN TRANSCRIPT\nASSISTANT: What is your formal education background, if any, and what types of work experience do you have that might be relevant here?\n\nUSER: I studied some college math and I am comfortable with basic programming, especially a little Python.\n\nEND TRANSCRIPT"
+            }
+        ]
+    },
+    {
+        "role": "assistant",
+        "content": "Given your background in college math and basic programming skills including Python, at what level do you feel comfortable starting our exploration today? Would you prefer a review of fundamentals or dive into more advanced topics?",
         "task_name": "onboarding_transition",
         "visible": true,
         "dynamic_prompts": [
@@ -68,13 +122,13 @@
             },
             {
                 "role": "user",
-                "content": "Completed field transcript:\nASSISTANT: What topic have you found yourself curious about lately, even if it seems a bit random or hard to explain?\nUSER: I'm interested in learning about advanced methods of statistics and modelling. I've learned about gaussian processes, RTS kalman filters, and other things that are useful to model real word physics given some underlying constraints plus an uncertainty\n\nNext onboarding field: starting_point\nPurpose: learn what the learner already knows and where the exploration should begin. Good question shape: For that topic, should we start from brand new, the basics, something you have explored a bit, or somewhere deeper?.\nUse the transcript only to close the completed field.\nThe next question must collect the next field for an exploratory-learning profile.\nWrite exactly two sentences."
+                "content": "Completed field transcript:\nASSISTANT: What is your formal education background, if any, and what types of work experience do you have that might be relevant here?\nUSER: I studied some college math and I am comfortable with basic programming, especially a little Python.\n\nNext onboarding field: starting_point\nPurpose: learn what the learner already knows and where the exploration should begin. Good question shape: For that topic, should we start from brand new, the basics, something you have explored a bit, or somewhere deeper?.\nUse the transcript only to close the completed field.\nThe next question must collect the next field for an exploratory-learning profile.\nWrite exactly two sentences."
             }
         ]
     },
     {
         "role": "user",
-        "content": "Go deeper",
+        "content": "I have done a little Python, but I do not really know game loops or physics simulation yet.",
         "task_name": null,
         "visible": true,
         "dynamic_prompts": [],
@@ -82,7 +136,7 @@
     },
     {
         "role": "assistant",
-        "content": "{\"field\": \"starting_point\", \"value\": \"Go deeper\", \"signals\": [\"advanced_topics\", \"delved_into\"], \"freeform_notes\": \"User has experience with advanced topics like Gaussian processes and RTS Kalman filters.\", \"evidence\": \"USER: Go deeper\"}",
+        "content": "{\"field\": \"starting_point\", \"confidence\": 0.7, \"value\": \"I have done a little Python, but I do not really know game loops or physics simulation yet.\", \"signals\": [\"little experience with Python\", \"not familiar with game loops and physics simulation\"], \"freeform_notes\": \"The user mentions having only a bit of Python knowledge and being unfamiliar with specific concepts like game loops and physics simulation.\", \"evidence\": \"USER: I have done a little Python, but I do not really know game loops or physics simulation yet.\"}",
         "task_name": "onboarding_profile_extraction",
         "visible": false,
         "dynamic_prompts": [
@@ -99,13 +153,13 @@
             },
             {
                 "role": "user",
-                "content": "BEGIN TRANSCRIPT\nASSISTANT: You've delved into advanced topics like Gaussian processes and RTS Kalman filters. For that topic, should we start from basics or go deeper?\n\nUSER: Go deeper\n\nEND TRANSCRIPT"
+                "content": "BEGIN TRANSCRIPT\nASSISTANT: Given your background in college math and basic programming skills including Python, at what level do you feel comfortable starting our exploration today? Would you prefer a review of fundamentals or dive into more advanced topics?\n\nUSER: I have done a little Python, but I do not really know game loops or physics simulation yet.\n\nEND TRANSCRIPT"
             }
         ]
     },
     {
         "role": "assistant",
-        "content": "Great! It seems you found the advanced topics challenging but rewarding. When learning something new, what usually helps it click: examples, stories, visuals, analogies, hands-on projects, big-picture maps, or discussion?",
+        "content": "When learning something new, what usually helps it click: examples, stories, visuals, analogies, hands-on projects, big-picture maps, or discussion? Would you be comfortable with a mix of these methods today?",
         "task_name": "onboarding_transition",
         "visible": true,
         "dynamic_prompts": [
@@ -122,13 +176,13 @@
             },
             {
                 "role": "user",
-                "content": "Completed field transcript:\nASSISTANT: You've delved into advanced topics like Gaussian processes and RTS Kalman filters. For that topic, should we start from basics or go deeper?\nUSER: Go deeper\n\nNext onboarding field: learning_texture\nPurpose: learn what kinds of explanations or activities help things click. Good question shape: When learning something new, what usually helps it click: examples, stories, visuals, analogies, hands-on projects, big-picture maps, or discussion?.\nUse the transcript only to close the completed field.\nThe next question must collect the next field for an exploratory-learning profile.\nWrite exactly two sentences."
+                "content": "Completed field transcript:\nASSISTANT: Given your background in college math and basic programming skills including Python, at what level do you feel comfortable starting our exploration today? Would you prefer a review of fundamentals or dive into more advanced topics?\nUSER: I have done a little Python, but I do not really know game loops or physics simulation yet.\n\nNext onboarding field: learning_texture\nPurpose: learn what kinds of explanations or activities help things click. Good question shape: When learning something new, what usually helps it click: examples, stories, visuals, analogies, hands-on projects, big-picture maps, or discussion?.\nUse the transcript only to close the completed field.\nThe next question must collect the next field for an exploratory-learning profile.\nWrite exactly two sentences."
             }
         ]
     },
     {
         "role": "user",
-        "content": "visuals, analogies, and big picture stuff",
+        "content": "Examples and hands-on projects help most. I like visual explanations too.",
         "task_name": null,
         "visible": true,
         "dynamic_prompts": [],
@@ -136,7 +190,7 @@
     },
     {
         "role": "assistant",
-        "content": "{\"field\": \"learning_texture\", \"confidence\": 0.7, \"value\": \"...\", \"signals\": [\"visuals\", \"analogies\", \"big-picture-stuff\"], \"freeform_notes\": \"User provided specific examples of learning textures they find helpful.\", \"evidence\": \"USER: visuals, analogies, and big picture stuff\"}",
+        "content": "{\"field\": \"learning_texture\", \"confidence\": 0.7, \"value\": \"Examples and hands-on projects help most. I like visual explanations too.\", \"signals\": [\"examples\", \"hands-on projects\"], \"freeform_notes\": \"User prefers examples, hands-on projects, and visuals for learning new things.\", \"evidence\": \"USER: Examples and hands-on projects help most. I like visual explanations too.\"}",
         "task_name": "onboarding_profile_extraction",
         "visible": false,
         "dynamic_prompts": [
@@ -153,13 +207,13 @@
             },
             {
                 "role": "user",
-                "content": "BEGIN TRANSCRIPT\nASSISTANT: Great! It seems you found the advanced topics challenging but rewarding. When learning something new, what usually helps it click: examples, stories, visuals, analogies, hands-on projects, big-picture maps, or discussion?\n\nUSER: visuals, analogies, and big picture stuff\n\nEND TRANSCRIPT"
+                "content": "BEGIN TRANSCRIPT\nASSISTANT: When learning something new, what usually helps it click: examples, stories, visuals, analogies, hands-on projects, big-picture maps, or discussion? Would you be comfortable with a mix of these methods today?\n\nUSER: Examples and hands-on projects help most. I like visual explanations too.\n\nEND TRANSCRIPT"
             }
         ]
     },
     {
         "role": "assistant",
-        "content": "By the end of this session, what would you like to have gained: a clear explanation, a mental model, something made, more questions, a practical skill, or a surprising insight?",
+        "content": "By the end of today's session, what would you like to walk away with: a clear explanation, a mental model, something made, next questions, a practical skill, or a surprising insight? How does this align with your preference for learning methods shared earlier?",
         "task_name": "onboarding_transition",
         "visible": true,
         "dynamic_prompts": [
@@ -176,13 +230,13 @@
             },
             {
                 "role": "user",
-                "content": "Completed field transcript:\nASSISTANT: Great! It seems you found the advanced topics challenging but rewarding. When learning something new, what usually helps it click: examples, stories, visuals, analogies, hands-on projects, big-picture maps, or discussion?\nUSER: visuals, analogies, and big picture stuff\n\nNext onboarding field: desired_outcome\nPurpose: learn what would make the first session feel worthwhile. Good question shape: By the end of a good exploration, what would you like to walk away with: a clear explanation, a mental model, something made, next questions, a practical skill, or a surprising insight?.\nUse the transcript only to close the completed field.\nThe next question must collect the next field for an exploratory-learning profile.\nWrite exactly two sentences."
+                "content": "Completed field transcript:\nASSISTANT: When learning something new, what usually helps it click: examples, stories, visuals, analogies, hands-on projects, big-picture maps, or discussion? Would you be comfortable with a mix of these methods today?\nUSER: Examples and hands-on projects help most. I like visual explanations too.\n\nNext onboarding field: desired_outcome\nPurpose: learn what would make the first session feel worthwhile. Good question shape: By the end of a good exploration, what would you like to walk away with: a clear explanation, a mental model, something made, next questions, a practical skill, or a surprising insight?.\nUse the transcript only to close the completed field.\nThe next question must collect the next field for an exploratory-learning profile.\nWrite exactly two sentences."
             }
         ]
     },
     {
         "role": "user",
-        "content": "better mental model",
+        "content": "I want to walk away with a mental model and a tiny thing I made.",
         "task_name": null,
         "visible": true,
         "dynamic_prompts": [],
@@ -190,7 +244,7 @@
     },
     {
         "role": "assistant",
-        "content": "{\"field\": \"desired_outcome\", \"confidence\": 0.7, \"value\": \"better mental model\", \"signals\": [\"mental model\"], \"freeform_notes\": \"User provided a clear answer without any hesitation.\", \"evidence\": \"USER: better mental model\"}",
+        "content": "{\"field\": \"desired_outcome\", \"confidence\": 0.7, \"value\": \"...\", \"signals\": [\"mental model\", \"something made\"], \"freeform_notes\": \"The user provided two distinct desired outcomes, indicating they value both a mental model and something tangible.\", \"evidence\": \"USER: I want to walk away with a mental model and a tiny thing I made.\"}",
         "task_name": "onboarding_profile_extraction",
         "visible": false,
         "dynamic_prompts": [
@@ -207,13 +261,13 @@
             },
             {
                 "role": "user",
-                "content": "BEGIN TRANSCRIPT\nASSISTANT: By the end of this session, what would you like to have gained: a clear explanation, a mental model, something made, more questions, a practical skill, or a surprising insight?\n\nUSER: better mental model\n\nEND TRANSCRIPT"
+                "content": "BEGIN TRANSCRIPT\nASSISTANT: By the end of today's session, what would you like to walk away with: a clear explanation, a mental model, something made, next questions, a practical skill, or a surprising insight? How does this align with your preference for learning methods shared earlier?\n\nUSER: I want to walk away with a mental model and a tiny thing I made.\n\nEND TRANSCRIPT"
             }
         ]
     },
     {
         "role": "assistant",
-        "content": "Great! You're looking to solidify your understanding of a concept. What should I avoid so this does not feel like school: jargon, long lectures, quizzes, homework, going too slowly, going too fast, too much theory, or too few examples?",
+        "content": "By focusing on a mental model and something you made, what aspects of learning do you find most engaging? What should I avoid so this does not feel like school: jargon, long lectures, quizzes, homework, going too slowly, going too fast, too much theory, or too few examples?",
         "task_name": "onboarding_transition",
         "visible": true,
         "dynamic_prompts": [
@@ -230,13 +284,13 @@
             },
             {
                 "role": "user",
-                "content": "Completed field transcript:\nASSISTANT: By the end of this session, what would you like to have gained: a clear explanation, a mental model, something made, more questions, a practical skill, or a surprising insight?\nUSER: better mental model\n\nNext onboarding field: avoid\nPurpose: learn what makes learning feel boring, frustrating, or too much like school. Good question shape: What should I avoid so this does not feel like school: jargon, long lectures, quizzes, homework, going too slowly, going too fast, too much theory, or too few examples?.\nUse the transcript only to close the completed field.\nThe next question must collect the next field for an exploratory-learning profile.\nWrite exactly two sentences."
+                "content": "Completed field transcript:\nASSISTANT: By the end of today's session, what would you like to walk away with: a clear explanation, a mental model, something made, next questions, a practical skill, or a surprising insight? How does this align with your preference for learning methods shared earlier?\nUSER: I want to walk away with a mental model and a tiny thing I made.\n\nNext onboarding field: avoid\nPurpose: learn what makes learning feel boring, frustrating, or too much like school. Good question shape: What should I avoid so this does not feel like school: jargon, long lectures, quizzes, homework, going too slowly, going too fast, too much theory, or too few examples?.\nUse the transcript only to close the completed field.\nThe next question must collect the next field for an exploratory-learning profile.\nWrite exactly two sentences."
             }
         ]
     },
     {
         "role": "user",
-        "content": "going too slowly. I want a solid intuition",
+        "content": "Please avoid long lectures, jargon, and quiz vibes.",
         "task_name": null,
         "visible": true,
         "dynamic_prompts": [],
@@ -244,7 +298,7 @@
     },
     {
         "role": "assistant",
-        "content": "{\"field\": \"avoid\", \"value\": \"going too slowly\", \"signals\": [\"jargon\", \"long lectures\", \"quizzes\", \"homework\", \"too much theory\", \"too few examples\"], \"freeform_notes\": \"The user mentioned avoiding 'going too slowly' and emphasized wanting a solid intuition.\", \"evidence\": \"BEGIN TRANSCRIPT\\nASSISTANT: What should I avoid so this does not feel like school: jargon, long lectures, quizzes, homework, going too slowly, going too fast, too much theory, or too few examples?\\nUSER: going too slowly. I want a solid intuition\\nEND TRANSCRIPT\"}",
+        "content": "{\"field\": \"avoid\", \"confidence\": 0.7, \"value\": \"long lectures, jargon, and quiz vibes\", \"signals\": [\"jargon\", \"long lectures\", \"quizzes\"], \"freeform_notes\": \"User mentioned avoiding long lectures, jargon, and quizzes.\", \"evidence\": \"Please avoid long lectures, jargon, and quiz vibes.\"}",
         "task_name": "onboarding_profile_extraction",
         "visible": false,
         "dynamic_prompts": [
@@ -261,30 +315,30 @@
             },
             {
                 "role": "user",
-                "content": "BEGIN TRANSCRIPT\nASSISTANT: Great! You're looking to solidify your understanding of a concept. What should I avoid so this does not feel like school: jargon, long lectures, quizzes, homework, going too slowly, going too fast, too much theory, or too few examples?\n\nUSER: going too slowly. I want a solid intuition\n\nEND TRANSCRIPT"
+                "content": "BEGIN TRANSCRIPT\nASSISTANT: By focusing on a mental model and something you made, what aspects of learning do you find most engaging? What should I avoid so this does not feel like school: jargon, long lectures, quizzes, homework, going too slowly, going too fast, too much theory, or too few examples?\n\nUSER: Please avoid long lectures, jargon, and quiz vibes.\n\nEND TRANSCRIPT"
             }
         ]
     },
     {
         "role": "assistant",
-        "content": "{\"topics\": {\"advanced-statistics-modeling\": {\"intuition\": 0.3, \"details\": 0.2, \"confidence\": 0.5}}, \"preferences\": {\"explanation_style\": [\"visuals\", \"analogies\", \"big picture stuff\"], \"dislikes\": [\"jargon\", \"long lectures\", \"quizzes\", \"homework\", \"going too slowly\", \"too much theory\"], \"desired_outcomes\": [\"better mental model\"]}, \"interests\": [\"statistics\", \"modelling\"], \"current_topics\": [\"advanced-statistics-modeling\"]}",
+        "content": "{\"background\": {\"education_level\": \"college_math\", \"fields\": [\"programming\", \"math\"], \"self_description\": [\"curious about game development\"]}, \"topics\": {\"tiny_games_simulation\": {\"intuition\": 0.1, \"details\": 0.1, \"confidence\": 0.5}}, \"preferences\": {\"explanation_style\": [\"examples\", \"hands_on_projects\"], \"dislikes\": [\"long_lectures\", \"jargon\", \"quizzes\"], \"desired_outcomes\": [\"mental_model\", \"practical_skill\"]}, \"interests\": [\"game_development\", \"simulation\"], \"current_topics\": [\"tiny_games_simulation\"]}",
         "task_name": "onboarding_profile_seed",
         "visible": false,
         "dynamic_prompts": [],
         "input_messages": [
             {
                 "role": "system",
-                "content": "You generate a compact user profile seed from exploratory-learning onboarding.\n\nAnalyze the full onboarding transcript only. Do not answer the user or continue the conversation.\n\nThe profile is a sparse overlay on a topic graph. Keep it compact. Do not include evidence, explanations, or conversation summaries.\n\nReturn strict JSON only:\n\n{\n  \"topics\": {\n    \"canonical_topic_id\": {\n      \"intuition\": 0.0,\n      \"details\": 0.0,\n      \"confidence\": 0.5\n    }\n  },\n  \"preferences\": {\n    \"explanation_style\": [\"...\"],\n    \"dislikes\": [\"...\"],\n    \"desired_outcomes\": [\"...\"]\n  },\n  \"interests\": [\"...\"],\n  \"current_topics\": [\"...\"]\n}\n\nRules:\n- Use snake_case canonical topic IDs.\n- Add only topics directly supported by the transcript.\n- Use low confidence for tentative onboarding inferences.\n- For topics the user says they know a little, use low-but-nonzero intuition/details.\n- For topics the user says they do not know yet, use zero intuition/details with moderate confidence.\n- Preferences should be durable teaching defaults, not one-off details.\n- Interests should be topic-like strings, not full sentences.\n- Current topics should be the most useful starting topic IDs for the first learning session.\n- Do not include fields outside the JSON schema.\n"
+                "content": "You generate a compact user profile seed from exploratory-learning onboarding.\n\nAnalyze the full onboarding transcript only. Do not answer the user or continue the conversation.\n\nThe profile is a sparse overlay on a topic graph. Keep it compact. Do not include evidence, explanations, or conversation summaries.\n\nReturn strict JSON only:\n\n{\n  \"background\": {\n    \"education_level\": \"...\",\n    \"fields\": [\"...\"],\n    \"self_description\": [\"...\"]\n  },\n  \"topics\": {\n    \"canonical_topic_id\": {\n      \"intuition\": 0.0,\n      \"details\": 0.0,\n      \"confidence\": 0.5\n    }\n  },\n  \"preferences\": {\n    \"explanation_style\": [\"...\"],\n    \"dislikes\": [\"...\"],\n    \"desired_outcomes\": [\"...\"]\n  },\n  \"interests\": [\"...\"],\n  \"current_topics\": [\"...\"]\n}\n\nRules:\n- Background is an informal prior, not proof of specific topic mastery.\n- Use snake_case canonical topic IDs.\n- Add only topics directly supported by the transcript.\n- Use low confidence for tentative onboarding inferences.\n- For topics the user says they know a little, use low-but-nonzero intuition/details.\n- For topics the user says they do not know yet, use zero intuition/details with moderate confidence.\n- Preferences should be durable teaching defaults, not one-off details.\n- Interests should be topic-like strings, not full sentences.\n- Current topics should be the most useful starting topic IDs for the first learning session.\n- Do not include fields outside the JSON schema.\n"
             },
             {
                 "role": "user",
-                "content": "BEGIN TRANSCRIPT\nASSISTANT: What topic have you found yourself curious about lately, even if it seems a bit random or hard to explain?\n\nUSER: I'm interested in learning about advanced methods of statistics and modelling. I've learned about gaussian processes, RTS kalman filters, and other things that are useful to model real word physics given some underlying constraints plus an uncertainty\n\nASSISTANT: You've delved into advanced topics like Gaussian processes and RTS Kalman filters. For that topic, should we start from basics or go deeper?\n\nUSER: Go deeper\n\nASSISTANT: Great! It seems you found the advanced topics challenging but rewarding. When learning something new, what usually helps it click: examples, stories, visuals, analogies, hands-on projects, big-picture maps, or discussion?\n\nUSER: visuals, analogies, and big picture stuff\n\nASSISTANT: By the end of this session, what would you like to have gained: a clear explanation, a mental model, something made, more questions, a practical skill, or a surprising insight?\n\nUSER: better mental model\n\nASSISTANT: Great! You're looking to solidify your understanding of a concept. What should I avoid so this does not feel like school: jargon, long lectures, quizzes, homework, going too slowly, going too fast, too much theory, or too few examples?\n\nUSER: going too slowly. I want a solid intuition\n\nEND TRANSCRIPT"
+                "content": "BEGIN TRANSCRIPT\nASSISTANT: What is something you've been curious about lately, even if it feels random, vague, or hard to explain?\n\nUSER: I keep wondering how people make tiny games and simulations, especially the parts where simple rules create surprising behavior.\n\nASSISTANT: What is your formal education background, if any, and what types of work experience do you have that might be relevant here?\n\nUSER: I studied some college math and I am comfortable with basic programming, especially a little Python.\n\nASSISTANT: Given your background in college math and basic programming skills including Python, at what level do you feel comfortable starting our exploration today? Would you prefer a review of fundamentals or dive into more advanced topics?\n\nUSER: I have done a little Python, but I do not really know game loops or physics simulation yet.\n\nASSISTANT: When learning something new, what usually helps it click: examples, stories, visuals, analogies, hands-on projects, big-picture maps, or discussion? Would you be comfortable with a mix of these methods today?\n\nUSER: Examples and hands-on projects help most. I like visual explanations too.\n\nASSISTANT: By the end of today's session, what would you like to walk away with: a clear explanation, a mental model, something made, next questions, a practical skill, or a surprising insight? How does this align with your preference for learning methods shared earlier?\n\nUSER: I want to walk away with a mental model and a tiny thing I made.\n\nASSISTANT: By focusing on a mental model and something you made, what aspects of learning do you find most engaging? What should I avoid so this does not feel like school: jargon, long lectures, quizzes, homework, going too slowly, going too fast, too much theory, or too few examples?\n\nUSER: Please avoid long lectures, jargon, and quiz vibes.\n\nEND TRANSCRIPT"
             }
         ]
     },
     {
         "role": "assistant",
-        "content": "You're an enthusiast who has already explored advanced statistical and modeling techniques such as Gaussian processes and RTS Kalman filters. For your next learning experience, we'll start with the basics to build a strong foundation before diving deep into these complex methods.",
+        "content": "Summarizing the learner profile in warm, concrete language:\nYou're a curious individual who enjoys exploring how simple rules can lead to surprising outcomes, specifically in game development. Your background includes some college-level mathematics and basic Python programming skills, which makes you comfortable with foundational concepts but eager to delve deeper into more advanced topics.",
         "task_name": "onboarding_complete",
         "visible": true,
         "dynamic_prompts": [],
@@ -295,13 +349,13 @@
             },
             {
                 "role": "user",
-                "content": "BEGIN TRANSCRIPT\nASSISTANT: What topic have you found yourself curious about lately, even if it seems a bit random or hard to explain?\n\nUSER: I'm interested in learning about advanced methods of statistics and modelling. I've learned about gaussian processes, RTS kalman filters, and other things that are useful to model real word physics given some underlying constraints plus an uncertainty\n\nASSISTANT: You've delved into advanced topics like Gaussian processes and RTS Kalman filters. For that topic, should we start from basics or go deeper?\n\nUSER: Go deeper\n\nASSISTANT: Great! It seems you found the advanced topics challenging but rewarding. When learning something new, what usually helps it click: examples, stories, visuals, analogies, hands-on projects, big-picture maps, or discussion?\n\nUSER: visuals, analogies, and big picture stuff\n\nASSISTANT: By the end of this session, what would you like to have gained: a clear explanation, a mental model, something made, more questions, a practical skill, or a surprising insight?\n\nUSER: better mental model\n\nASSISTANT: Great! You're looking to solidify your understanding of a concept. What should I avoid so this does not feel like school: jargon, long lectures, quizzes, homework, going too slowly, going too fast, too much theory, or too few examples?\n\nUSER: going too slowly. I want a solid intuition\n\nEND TRANSCRIPT"
+                "content": "BEGIN TRANSCRIPT\nASSISTANT: What is something you've been curious about lately, even if it feels random, vague, or hard to explain?\n\nUSER: I keep wondering how people make tiny games and simulations, especially the parts where simple rules create surprising behavior.\n\nASSISTANT: What is your formal education background, if any, and what types of work experience do you have that might be relevant here?\n\nUSER: I studied some college math and I am comfortable with basic programming, especially a little Python.\n\nASSISTANT: Given your background in college math and basic programming skills including Python, at what level do you feel comfortable starting our exploration today? Would you prefer a review of fundamentals or dive into more advanced topics?\n\nUSER: I have done a little Python, but I do not really know game loops or physics simulation yet.\n\nASSISTANT: When learning something new, what usually helps it click: examples, stories, visuals, analogies, hands-on projects, big-picture maps, or discussion? Would you be comfortable with a mix of these methods today?\n\nUSER: Examples and hands-on projects help most. I like visual explanations too.\n\nASSISTANT: By the end of today's session, what would you like to walk away with: a clear explanation, a mental model, something made, next questions, a practical skill, or a surprising insight? How does this align with your preference for learning methods shared earlier?\n\nUSER: I want to walk away with a mental model and a tiny thing I made.\n\nASSISTANT: By focusing on a mental model and something you made, what aspects of learning do you find most engaging? What should I avoid so this does not feel like school: jargon, long lectures, quizzes, homework, going too slowly, going too fast, too much theory, or too few examples?\n\nUSER: Please avoid long lectures, jargon, and quiz vibes.\n\nEND TRANSCRIPT"
             }
         ]
     },
     {
         "role": "assistant",
-        "content": "We'll use visuals, analogies, and big-picture explanations to help you grasp the concepts better. By the end of this session, you aim to have a clearer mental model of advanced statistics and modeling techniques. We won't want to go too slowly or include jargon; instead, we'll focus on making sure you understand these ideas intuitively.",
+        "content": "Launching the first learning experience by naming the topic, level, preferred style, and guardrails:\nWe'll start today's session exploring how simple rules can create complex behavior in games. You're at a beginner-intermediate level, so we'll focus on fundamentals like game loops and basic physics simulations. Your preferred learning methods are examples and hands-on projects, so I'll provide plenty of those along with visual explanations to keep things engaging. We'll avoid long lectures, jargon, and quizzes to ensure this feels more like an exploration rather than traditional school lessons.",
         "task_name": "onboarding_complete",
         "visible": true,
         "dynamic_prompts": [],
@@ -312,89 +366,7 @@
             },
             {
                 "role": "user",
-                "content": "BEGIN TRANSCRIPT\nASSISTANT: What topic have you found yourself curious about lately, even if it seems a bit random or hard to explain?\n\nUSER: I'm interested in learning about advanced methods of statistics and modelling. I've learned about gaussian processes, RTS kalman filters, and other things that are useful to model real word physics given some underlying constraints plus an uncertainty\n\nASSISTANT: You've delved into advanced topics like Gaussian processes and RTS Kalman filters. For that topic, should we start from basics or go deeper?\n\nUSER: Go deeper\n\nASSISTANT: Great! It seems you found the advanced topics challenging but rewarding. When learning something new, what usually helps it click: examples, stories, visuals, analogies, hands-on projects, big-picture maps, or discussion?\n\nUSER: visuals, analogies, and big picture stuff\n\nASSISTANT: By the end of this session, what would you like to have gained: a clear explanation, a mental model, something made, more questions, a practical skill, or a surprising insight?\n\nUSER: better mental model\n\nASSISTANT: Great! You're looking to solidify your understanding of a concept. What should I avoid so this does not feel like school: jargon, long lectures, quizzes, homework, going too slowly, going too fast, too much theory, or too few examples?\n\nUSER: going too slowly. I want a solid intuition\n\nEND TRANSCRIPT"
-            }
-        ]
-    },
-    {
-        "role": "user",
-        "content": "Okay",
-        "task_name": null,
-        "visible": true,
-        "dynamic_prompts": [],
-        "input_messages": []
-    },
-    {
-        "role": "assistant",
-        "content": "{\"field\": \"avoid\", \"value\": \"going too slowly\", \"signals\": [\"jargon\", \"too much theory\"], \"freeform_notes\": \"The user mentioned avoiding going too slowly and having too much theory, but did not explicitly mention jargon.\", \"evidence\": \"USER: going too slowly. I want a solid intuition\\nASSISTANT: By the end of this session, you aim to have a clearer mental model of advanced statistics and modeling techniques. We won't want to go too slowly or include jargon; instead, we'll focus on making sure you understand these ideas intuitively.\"}",
-        "task_name": "onboarding_profile_extraction",
-        "visible": false,
-        "dynamic_prompts": [
-            "Onboarding field: avoid\nPurpose: learn what makes learning feel boring, frustrating, or too much like school. Good question shape: What should I avoid so this does not feel like school: jargon, long lectures, quizzes, homework, going too slowly, going too fast, too much theory, or too few examples?.\nTask: ask the user one concise question that collects this field for an exploratory-learning profile.\nUse the suggested prompt shape if it fits, but adapt to the transcript naturally.\nDo not answer for the user."
-        ],
-        "input_messages": [
-            {
-                "role": "system",
-                "content": "You are a profile extraction system.\n\nAnalyze the onboarding transcript only. Do not answer the user or continue the conversation.\n\nUse the onboarding field in the transcript to decide what signal to extract. Base every claim on evidence.\n\nReturn strict JSON only:\n\n{\n  \"field\": \"curiosity_anchor | starting_point | learning_texture | desired_outcome | avoid\",\n  \"confidence\": 0.7,\n  \"value\": \"...\",\n  \"signals\": [\"...\"],\n  \"freeform_notes\": \"...\",\n  \"evidence\": \"brief transcript evidence\"\n}\n\nRules:\n- Prefer fewer high-confidence observations.\n- Preserve the user's own phrasing when it is meaningful.\n- Extract from the user's answers, not from wording in the assistant questions.\n- Never use \"...\" as a value if the user gave a real answer.\n- Do not infer personality traits or diagnose ability.\n- Do not invent prior knowledge, goals, or preferences.\n- If the signal is unclear, set confidence below 0.5 and explain what is missing in freeform_notes.\n"
-            },
-            {
-                "role": "system",
-                "content": "Onboarding field: avoid\nPurpose: learn what makes learning feel boring, frustrating, or too much like school. Good question shape: What should I avoid so this does not feel like school: jargon, long lectures, quizzes, homework, going too slowly, going too fast, too much theory, or too few examples?.\nTask: ask the user one concise question that collects this field for an exploratory-learning profile.\nUse the suggested prompt shape if it fits, but adapt to the transcript naturally.\nDo not answer for the user."
-            },
-            {
-                "role": "user",
-                "content": "BEGIN TRANSCRIPT\nASSISTANT: Great! You're looking to solidify your understanding of a concept. What should I avoid so this does not feel like school: jargon, long lectures, quizzes, homework, going too slowly, going too fast, too much theory, or too few examples?\n\nUSER: going too slowly. I want a solid intuition\n\nASSISTANT: You're an enthusiast who has already explored advanced statistical and modeling techniques such as Gaussian processes and RTS Kalman filters. For your next learning experience, we'll start with the basics to build a strong foundation before diving deep into these complex methods.\n\nASSISTANT: We'll use visuals, analogies, and big-picture explanations to help you grasp the concepts better. By the end of this session, you aim to have a clearer mental model of advanced statistics and modeling techniques. We won't want to go too slowly or include jargon; instead, we'll focus on making sure you understand these ideas intuitively.\n\nUSER: Okay\n\nEND TRANSCRIPT"
-            }
-        ]
-    },
-    {
-        "role": "assistant",
-        "content": "{\"topics\": {\"advanced-statistics-and-modelling\": {\"intuition\": 0.5, \"details\": 0.5, \"confidence\": 0.7}}, \"preferences\": {\"explanation_style\": [\"visuals\", \"analogies\", \"big-picture-stuff\"], \"dislikes\": [\"jargon\", \"long-lectures\", \"quizzes\", \"homework\", \"going-too-slowly\"], \"desired_outcomes\": [\"better-mental-model\"]}, \"interests\": [\"advanced-statistics-and-modelling\"], \"current_topics\": [\"advanced-statistics-and-modelling\"]}",
-        "task_name": "onboarding_profile_seed",
-        "visible": false,
-        "dynamic_prompts": [],
-        "input_messages": [
-            {
-                "role": "system",
-                "content": "You generate a compact user profile seed from exploratory-learning onboarding.\n\nAnalyze the full onboarding transcript only. Do not answer the user or continue the conversation.\n\nThe profile is a sparse overlay on a topic graph. Keep it compact. Do not include evidence, explanations, or conversation summaries.\n\nReturn strict JSON only:\n\n{\n  \"topics\": {\n    \"canonical_topic_id\": {\n      \"intuition\": 0.0,\n      \"details\": 0.0,\n      \"confidence\": 0.5\n    }\n  },\n  \"preferences\": {\n    \"explanation_style\": [\"...\"],\n    \"dislikes\": [\"...\"],\n    \"desired_outcomes\": [\"...\"]\n  },\n  \"interests\": [\"...\"],\n  \"current_topics\": [\"...\"]\n}\n\nRules:\n- Use snake_case canonical topic IDs.\n- Add only topics directly supported by the transcript.\n- Use low confidence for tentative onboarding inferences.\n- For topics the user says they know a little, use low-but-nonzero intuition/details.\n- For topics the user says they do not know yet, use zero intuition/details with moderate confidence.\n- Preferences should be durable teaching defaults, not one-off details.\n- Interests should be topic-like strings, not full sentences.\n- Current topics should be the most useful starting topic IDs for the first learning session.\n- Do not include fields outside the JSON schema.\n"
-            },
-            {
-                "role": "user",
-                "content": "BEGIN TRANSCRIPT\nASSISTANT: What topic have you found yourself curious about lately, even if it seems a bit random or hard to explain?\n\nUSER: I'm interested in learning about advanced methods of statistics and modelling. I've learned about gaussian processes, RTS kalman filters, and other things that are useful to model real word physics given some underlying constraints plus an uncertainty\n\nASSISTANT: You've delved into advanced topics like Gaussian processes and RTS Kalman filters. For that topic, should we start from basics or go deeper?\n\nUSER: Go deeper\n\nASSISTANT: Great! It seems you found the advanced topics challenging but rewarding. When learning something new, what usually helps it click: examples, stories, visuals, analogies, hands-on projects, big-picture maps, or discussion?\n\nUSER: visuals, analogies, and big picture stuff\n\nASSISTANT: By the end of this session, what would you like to have gained: a clear explanation, a mental model, something made, more questions, a practical skill, or a surprising insight?\n\nUSER: better mental model\n\nASSISTANT: Great! You're looking to solidify your understanding of a concept. What should I avoid so this does not feel like school: jargon, long lectures, quizzes, homework, going too slowly, going too fast, too much theory, or too few examples?\n\nUSER: going too slowly. I want a solid intuition\n\nASSISTANT: You're an enthusiast who has already explored advanced statistical and modeling techniques such as Gaussian processes and RTS Kalman filters. For your next learning experience, we'll start with the basics to build a strong foundation before diving deep into these complex methods.\n\nASSISTANT: We'll use visuals, analogies, and big-picture explanations to help you grasp the concepts better. By the end of this session, you aim to have a clearer mental model of advanced statistics and modeling techniques. We won't want to go too slowly or include jargon; instead, we'll focus on making sure you understand these ideas intuitively.\n\nUSER: Okay\n\nEND TRANSCRIPT"
-            }
-        ]
-    },
-    {
-        "role": "assistant",
-        "content": "Summarize the learner profile in warm, concrete language:\nYou're a curious individual who has already explored advanced statistical and modeling techniques like Gaussian processes and RTS Kalman filters. Your background suggests you have a strong foundation but are looking to refine your understanding and build a solid mental model.",
-        "task_name": "onboarding_complete",
-        "visible": true,
-        "dynamic_prompts": [],
-        "input_messages": [
-            {
-                "role": "system",
-                "content": "You finish exploratory-learning onboarding.\n\nInput:\n- the full onboarding transcript\n\nOutput exactly two short sentences:\n1. Summarize the learner profile in warm, concrete language.\n2. Launch the first learning experience by naming the topic, level, preferred style, and guardrails.\n\nRules:\n- Do not mention internal field names.\n- Do not say the profile is complete.\n- Do not ask another onboarding question.\n- Do not invent details.\n- Keep it conversational and specific.\n"
-            },
-            {
-                "role": "user",
-                "content": "BEGIN TRANSCRIPT\nASSISTANT: What topic have you found yourself curious about lately, even if it seems a bit random or hard to explain?\n\nUSER: I'm interested in learning about advanced methods of statistics and modelling. I've learned about gaussian processes, RTS kalman filters, and other things that are useful to model real word physics given some underlying constraints plus an uncertainty\n\nASSISTANT: You've delved into advanced topics like Gaussian processes and RTS Kalman filters. For that topic, should we start from basics or go deeper?\n\nUSER: Go deeper\n\nASSISTANT: Great! It seems you found the advanced topics challenging but rewarding. When learning something new, what usually helps it click: examples, stories, visuals, analogies, hands-on projects, big-picture maps, or discussion?\n\nUSER: visuals, analogies, and big picture stuff\n\nASSISTANT: By the end of this session, what would you like to have gained: a clear explanation, a mental model, something made, more questions, a practical skill, or a surprising insight?\n\nUSER: better mental model\n\nASSISTANT: Great! You're looking to solidify your understanding of a concept. What should I avoid so this does not feel like school: jargon, long lectures, quizzes, homework, going too slowly, going too fast, too much theory, or too few examples?\n\nUSER: going too slowly. I want a solid intuition\n\nASSISTANT: You're an enthusiast who has already explored advanced statistical and modeling techniques such as Gaussian processes and RTS Kalman filters. For your next learning experience, we'll start with the basics to build a strong foundation before diving deep into these complex methods.\n\nASSISTANT: We'll use visuals, analogies, and big-picture explanations to help you grasp the concepts better. By the end of this session, you aim to have a clearer mental model of advanced statistics and modeling techniques. We won't want to go too slowly or include jargon; instead, we'll focus on making sure you understand these ideas intuitively.\n\nUSER: Okay\n\nEND TRANSCRIPT"
-            }
-        ]
-    },
-    {
-        "role": "assistant",
-        "content": "Launch the first learning experience by naming the topic, level, preferred style, and guardrails:\nWe'll start with the basics of statistics and modelling to build a strong foundation before diving into more complex methods like Gaussian processes and RTS Kalman filters. Our approach will use visuals, analogies, and big-picture explanations to help you grasp these concepts intuitively. We won't go too slowly or include jargon; instead, we'll focus on making sure you understand these ideas clearly.",
-        "task_name": "onboarding_complete",
-        "visible": true,
-        "dynamic_prompts": [],
-        "input_messages": [
-            {
-                "role": "system",
-                "content": "You finish exploratory-learning onboarding.\n\nInput:\n- the full onboarding transcript\n\nOutput exactly two short sentences:\n1. Summarize the learner profile in warm, concrete language.\n2. Launch the first learning experience by naming the topic, level, preferred style, and guardrails.\n\nRules:\n- Do not mention internal field names.\n- Do not say the profile is complete.\n- Do not ask another onboarding question.\n- Do not invent details.\n- Keep it conversational and specific.\n"
-            },
-            {
-                "role": "user",
-                "content": "BEGIN TRANSCRIPT\nASSISTANT: What topic have you found yourself curious about lately, even if it seems a bit random or hard to explain?\n\nUSER: I'm interested in learning about advanced methods of statistics and modelling. I've learned about gaussian processes, RTS kalman filters, and other things that are useful to model real word physics given some underlying constraints plus an uncertainty\n\nASSISTANT: You've delved into advanced topics like Gaussian processes and RTS Kalman filters. For that topic, should we start from basics or go deeper?\n\nUSER: Go deeper\n\nASSISTANT: Great! It seems you found the advanced topics challenging but rewarding. When learning something new, what usually helps it click: examples, stories, visuals, analogies, hands-on projects, big-picture maps, or discussion?\n\nUSER: visuals, analogies, and big picture stuff\n\nASSISTANT: By the end of this session, what would you like to have gained: a clear explanation, a mental model, something made, more questions, a practical skill, or a surprising insight?\n\nUSER: better mental model\n\nASSISTANT: Great! You're looking to solidify your understanding of a concept. What should I avoid so this does not feel like school: jargon, long lectures, quizzes, homework, going too slowly, going too fast, too much theory, or too few examples?\n\nUSER: going too slowly. I want a solid intuition\n\nASSISTANT: You're an enthusiast who has already explored advanced statistical and modeling techniques such as Gaussian processes and RTS Kalman filters. For your next learning experience, we'll start with the basics to build a strong foundation before diving deep into these complex methods.\n\nASSISTANT: We'll use visuals, analogies, and big-picture explanations to help you grasp the concepts better. By the end of this session, you aim to have a clearer mental model of advanced statistics and modeling techniques. We won't want to go too slowly or include jargon; instead, we'll focus on making sure you understand these ideas intuitively.\n\nUSER: Okay\n\nEND TRANSCRIPT"
+                "content": "BEGIN TRANSCRIPT\nASSISTANT: What is something you've been curious about lately, even if it feels random, vague, or hard to explain?\n\nUSER: I keep wondering how people make tiny games and simulations, especially the parts where simple rules create surprising behavior.\n\nASSISTANT: What is your formal education background, if any, and what types of work experience do you have that might be relevant here?\n\nUSER: I studied some college math and I am comfortable with basic programming, especially a little Python.\n\nASSISTANT: Given your background in college math and basic programming skills including Python, at what level do you feel comfortable starting our exploration today? Would you prefer a review of fundamentals or dive into more advanced topics?\n\nUSER: I have done a little Python, but I do not really know game loops or physics simulation yet.\n\nASSISTANT: When learning something new, what usually helps it click: examples, stories, visuals, analogies, hands-on projects, big-picture maps, or discussion? Would you be comfortable with a mix of these methods today?\n\nUSER: Examples and hands-on projects help most. I like visual explanations too.\n\nASSISTANT: By the end of today's session, what would you like to walk away with: a clear explanation, a mental model, something made, next questions, a practical skill, or a surprising insight? How does this align with your preference for learning methods shared earlier?\n\nUSER: I want to walk away with a mental model and a tiny thing I made.\n\nASSISTANT: By focusing on a mental model and something you made, what aspects of learning do you find most engaging? What should I avoid so this does not feel like school: jargon, long lectures, quizzes, homework, going too slowly, going too fast, too much theory, or too few examples?\n\nUSER: Please avoid long lectures, jargon, and quiz vibes.\n\nEND TRANSCRIPT"
             }
         ]
     }

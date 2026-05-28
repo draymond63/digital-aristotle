@@ -1,9 +1,11 @@
 import json
+import os
+import dotenv
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, asdict, field
 from typing import Generator, Literal, get_args
-from ollama import ChatResponse
 from ollama import Client
+from openai import OpenAI
 from datetime import datetime
 
 
@@ -11,17 +13,28 @@ RoleType = Literal["user", "system", "assistant"]
 ROLES = get_args(RoleType)
 ContextFormat = Literal["messages", "transcript", "packet"]
 OutputFormat = Literal["text", "json"]
+ProviderType = Literal["ollama", "openai"]
+OPENAI_MODEL_PREFIXES = ("gpt-", "o1", "o3", "o4", "chatgpt-")
+LOCAL_TEACHER_MODEL = "phi4-mini:3.8b-q4_K_M"
+LOCAL_CONTROL_MODEL = "qwen2.5:3b-instruct-q4_K_M"
+API_TEACHER_MODEL = "gpt-4.1-mini"
 
 
 @dataclass(frozen=True)
 class Task:
     name: str
     static_prompt: str
+    model: str | None = None
     context_format: ContextFormat = "messages"
     visible_history: int | None = None
     dynamic_after_context: bool = False
     output_format: OutputFormat = "text"
+    # Model parameters
     temperature: float = 0.5
+    num_ctx: int = 4096
+    num_predict: int = 1000
+    top_p: float = 0.85
+    repeat_penalty: float = 1.12
 
 
 @dataclass
@@ -47,7 +60,8 @@ class LogEntry:
 
 
 class Conversation:
-    def __init__(self, entries: list[LogEntry] = []):
+    def __init__(self, entries: list[LogEntry] | None = None):
+        entries = entries or []
         assert isinstance(entries, list), f"Expected list[LogEntry], received {type(entries)}"
         self._entries = entries
 
@@ -93,7 +107,6 @@ class Conversation:
         ))
 
     def append_entry(self, entry: LogEntry):
-        print(entry)
         self._entries.append(entry)
 
     def copy(self):
@@ -129,9 +142,28 @@ class Conversation:
 
 
 class Agent:
-    def __init__(self, model='qwen2.5:3b-instruct-q4_K_M'):
-        self.model = model
-        self.client = Client()
+    def __init__(self):
+        dotenv.load_dotenv()
+        self.clients = {}
+
+    @staticmethod
+    def _provider_for_model(model: str) -> ProviderType:
+        if model.startswith(OPENAI_MODEL_PREFIXES):
+            return "openai"
+        return "ollama"
+
+    def _client_for_provider(self, provider: ProviderType):
+        if provider not in self.clients:
+            self.clients[provider] = self._build_client(provider)
+        return self.clients[provider]
+
+    @staticmethod
+    def _build_client(provider: ProviderType):
+        if provider == "ollama":
+            return Client()
+        if not os.getenv("OPENAI_API_KEY"):
+            raise RuntimeError("Set OPENAI_API_KEY to use an OpenAI model")
+        return OpenAI()
 
     def run_task(
         self,
@@ -141,7 +173,7 @@ class Agent:
         packet: str | None = None,
     ) -> str:
         response = self._generate_task(task, conversation, dynamic_prompts, packet)
-        return response.message.content
+        return self._message_content(response)
 
     def run_task_json(
         self,
@@ -152,7 +184,7 @@ class Agent:
     ) -> dict | list:
         response = self._generate_task(task, conversation, dynamic_prompts, packet, format="json")
         try:
-            return json.loads(response.message.content)
+            return json.loads(self._message_content(response))
         except Exception as e:
             raise RuntimeError(f"Failed to decode: {response}") from e
 
@@ -188,7 +220,16 @@ class Agent:
 
     def _generate_task(self, task: Task, conversation: Conversation, dynamic_prompts=None, packet=None, **kwargs):
         messages = self.build_task_messages(task, conversation, dynamic_prompts, packet)
-        return self._generate(messages, temperature=task.temperature, **kwargs)
+        return self._generate(
+            messages,
+            model=task.model,
+            temperature=task.temperature,
+            num_ctx=task.num_ctx,
+            num_predict=task.num_predict,
+            top_p=task.top_p,
+            repeat_penalty=task.repeat_penalty,
+            **kwargs,
+        )
 
     def _format_task_context(self, task: Task, conversation: Conversation, packet: str | None):
         visible_context = conversation.visible_messages().tail(task.visible_history)
@@ -209,20 +250,94 @@ class Agent:
         transcript += "END TRANSCRIPT"
         return transcript
 
-    def _generate(self, messages: list[dict[str, str]], temperature=0.7, **kwargs):
-        response = self.client.chat(
-            model=self.model,
+    def _generate(
+        self,
+        messages: list[dict[str, str]],
+        model: str | None = None,
+        temperature=0.7,
+        num_ctx=4096,
+        num_predict=220,
+        top_p=0.85,
+        repeat_penalty=1.12,
+        **kwargs,
+    ):
+        if model is None:
+            raise ValueError("Task model must be specified")
+        provider = self._provider_for_model(model)
+        if provider == "openai":
+            return self._generate_openai(
+                messages,
+                model=model,
+                temperature=temperature,
+                num_predict=num_predict,
+                top_p=top_p,
+                **kwargs,
+            )
+
+        options = {
+            "temperature": temperature,
+            "num_ctx": num_ctx,
+            "num_predict": num_predict,
+            "top_p": top_p,
+            "repeat_penalty": repeat_penalty,
+        }
+        response = self._client_for_provider("ollama").chat(
+            model=model,
             messages=messages,
-            options={'temperature': temperature},
+            options=options,
             **kwargs
         )
         return response
 
+    def _generate_openai(
+        self,
+        messages: list[dict[str, str]],
+        model: str,
+        temperature=0.7,
+        num_predict=220,
+        top_p=0.85,
+        stream=False,
+        format: str | None = None,
+        **kwargs,
+    ):
+        kwargs.pop("options", None)
+        request = {
+            "model": model,
+            "messages": messages,
+            "temperature": temperature,
+            "top_p": top_p,
+            "max_completion_tokens": num_predict,
+            **kwargs,
+        }
+        if format == "json":
+            request["response_format"] = {"type": "json_object"}
+        if stream:
+            request["stream"] = True
+            return self._client_for_provider("openai").chat.completions.create(**request)
+
+        return self._client_for_provider("openai").chat.completions.create(**request)
+
     @staticmethod
-    def _chunk_responses(response: Generator[ChatResponse, None, None], chunk_on="\n\n") -> Generator[str, None, None]:
+    def _message_content(response) -> str:
+        if hasattr(response, "message"):
+            return response.message.content
+        return response.choices[0].message.content or ""
+
+    @staticmethod
+    def _chunk_content(chunk) -> str:
+        if hasattr(chunk, "message"):
+            return chunk.message.content
+        if not chunk.choices:
+            return ""
+        return chunk.choices[0].delta.content or ""
+
+    @staticmethod
+    def _chunk_responses(response: Generator, chunk_on="\n\n") -> Generator[str, None, None]:
         buffer = ""
         for chunk in response:
-            content = chunk.message.content
+            content = Agent._chunk_content(chunk)
+            if not content:
+                continue
             buffer += content
             while chunk_on in buffer:
                 split_index = buffer.index(chunk_on)
@@ -234,11 +349,25 @@ class Agent:
             yield buffer.strip()
 
 
+def get_teacher_model():
+    dotenv.load_dotenv()
+    if os.getenv("USE_API") is not None:
+        return API_TEACHER_MODEL
+    return LOCAL_TEACHER_MODEL
+
+
+def get_control_model():
+    dotenv.load_dotenv()
+    if os.getenv("USE_API") is not None:
+        return API_TEACHER_MODEL
+    return LOCAL_CONTROL_MODEL
+
+
 
 class Brain(ABC):
     """Base class for stateful task-driven conversation loops."""
 
-    def __init__(self, messages=[]):
+    def __init__(self, messages: list[LogEntry] | None = None):
         self.agent = Agent()
         self.convo = Conversation(messages)
         self.__post_init__()
@@ -314,15 +443,18 @@ class Brain(ABC):
         conversation = conversation or self.convo
         dynamic_prompts = dynamic_prompts or []
         input_messages = self.agent.build_task_messages(task, conversation, dynamic_prompts, packet)
+        response = ""
         for content in self.agent.stream_task(task, conversation, dynamic_prompts, packet):
+            response = f"{response}\n\n{content}" if response else content
+            yield content
+        if response:
             self.convo.append_task_result(
                 task,
-                content,
+                response,
                 visible=visible,
                 dynamic_prompts=dynamic_prompts,
                 input_messages=input_messages,
             )
-            yield content
 
     def save(self):
         filename = datetime.now().isoformat(timespec="seconds").replace(":", "-")
@@ -334,6 +466,3 @@ class Brain(ABC):
 
     def set_convo(self, convo: Conversation):
         self.convo = convo
-
-
-

@@ -1,4 +1,4 @@
-from brains.comms.agent_base import Brain, Task, Conversation
+from brains.comms.agent_base import Brain, Task, Conversation, get_control_model
 from brains.comms.prompts_onboarder import *
 from brains.data.profile import Profile
 
@@ -33,41 +33,56 @@ class OnboardingBrain(Brain):
     }
     questions_per_dimension = 1
 
-    def __init__(self, username: str = "daniel", messages=[]):
+    def __init__(self, username: str = "daniel", messages=None):
         self.username = username
         self.profile_seed = None
         super().__init__(messages)
 
     def __post_init__(self):
-        self.ask_task = Task("onboarding_question", ONBOARDING_PROMPT, visible_history=6, temperature=0.5)
+        self.ask_task = Task(
+            "onboarding_question",
+            ONBOARDING_PROMPT,
+            model=get_control_model(),
+            visible_history=6,
+            temperature=0.4,
+            num_predict=90,
+        )
         self.transition_task = Task(
             "onboarding_transition",
             ONBOARDING_TRANSITION_PROMPT,
+            model=get_control_model(),
             context_format="packet",
             temperature=0.3,
+            num_predict=90,
         )
         self.evaluation_task = Task(
             "onboarding_profile_extraction",
             PROFILE_EXTRACTION_PROMPT,
+            model=get_control_model(),
             context_format="transcript",
             visible_history=8,
             output_format="json",
             temperature=0.0,
+            num_predict=180,
         )
         self.complete_task = Task(
             "onboarding_complete",
             ONBOARDING_COMPLETE_PROMPT,
+            model=get_control_model(),
             context_format="transcript",
             visible_history=None,
             temperature=0.4,
+            num_predict=120,
         )
         self.profile_seed_task = Task(
             "onboarding_profile_seed",
             PROFILE_SEED_PROMPT,
+            model=get_control_model(),
             context_format="transcript",
             visible_history=None,
             output_format="json",
             temperature=0.0,
+            num_predict=360,
         )
         self.dimensions_to_cover = list(self.user_dimensions.items())
         self.field_index = 0

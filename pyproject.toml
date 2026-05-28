@@ -10,10 +10,11 @@ authors = [{name = "Dan", email = "dan@raymond.ch"}]
 
 dependencies = [
     "ollama",
+    "openai",
     "chromadb",
     "pysqlite3",
     "transformers", # For tokenization
-    "dotenv",
+    "python-dotenv",
 
     # Interface
     "python-telegram-bot",

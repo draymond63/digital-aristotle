@@ -22,3 +22,16 @@ models
 
 models to avoid
 - qwen3.5:4b (to big)
+
+
+# OpenAI API option
+
+Each `Task` specifies its own model. The built-in task model helpers use `USE_API`
+as a presence-based switch:
+
+```env
+USE_API=1
+```
+
+Comment out `USE_API` to use Ollama. Leave it present to use OpenAI. `OPENAI_API_KEY`
+should be present in `.env` for OpenAI models.

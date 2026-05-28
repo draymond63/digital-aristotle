@@ -86,4 +86,10 @@ You must teach incrementally, check understanding, and adapt depth dynamically.
   - current lesson plans
   - user preferences
 
+# Model providers
+
+Each AI task specifies its own model. The built-in task model helpers use `USE_API`
+in `.env` to choose OpenAI; comment it out to use Ollama. See `ollama.md` for the
+current local and OpenAI setup notes.
+
 - Version controlled data with AI controlled git repo
