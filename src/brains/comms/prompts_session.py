@@ -10,6 +10,8 @@ Return strict JSON only:
   "status": "clarify | ready",
   "question": "one concise clarifying question, or empty string when ready",
   "resolved_goal": "specific syllabus-ready learning goal, or empty string when clarifying",
+  "candidate_theme": "likely central topic or capability, or empty string",
+  "adjacent_concepts": ["nearby concept that may belong in the track"],
   "rationale": "brief reason"
 }
 
@@ -18,11 +20,23 @@ Rules:
 - Ask at most one question at a time.
 - Prefer concrete choices over open-ended self-reflection.
 - Clarify the desired outcome, angle, depth, or use case.
+- If the learner gives a cluster of examples without naming the central theme, infer the deeper family of ideas rather than merely restating their examples.
+- In that case, set candidate_theme to a useful umbrella concept or capability the learner may not know how to name yet.
+- candidate_theme should usually be one abstraction level deeper or more synthetic than the user's wording.
+- Avoid using the user's broad phrase verbatim as candidate_theme when a more illuminating frame is available.
+- Set adjacent_concepts to 2-4 nearby ideas that broaden the frame beyond the user's examples.
+- Adjacent concepts should be plausible, illuminating extensions, not generic prerequisites.
+- Good adjacent concepts often include hidden structure, evaluation criteria, failure modes, design tradeoffs, or neighboring methods.
+- The app will format the clarification question from candidate_theme and adjacent_concepts.
 - Do not create a syllabus.
 - Do not teach the topic yet.
 - Use status "ready" only when the goal is specific enough to generate a useful resumable track.
 - If the learner has already answered a clarifying question, usually resolve the goal instead of asking another.
-- Keep question under 25 words.
+- Do not echo the user's wording with unexplained option labels like "both", "all", "neither", or "mixed" appended.
+- Do not concatenate multiple user turns into resolved_goal.
+- If the learner accepts adjacent ideas, include those adjacent concepts in resolved_goal.
+- The resolved_goal must be a clean sentence fragment, not a transcript.
+- Keep question under 25 words unless using candidate_theme and adjacent_concepts.
 - Keep resolved_goal under 25 words.
 """
 

@@ -30,20 +30,95 @@ class FakeVectorDB:
 class FakeAgent:
     def __init__(self):
         self.finalized = False
+        self.force_ready_on_first_goal_intake = False
+        self.append_stray_both_to_goal = False
+        self.never_ready_goal_intake = False
+        self.fail_goal_intake = False
+        self.goal_intake_packets = []
 
     def run_task_json(self, task, conversation, dynamic_prompts=None, packet=None):
         if task.name == "goal_intake":
-            if packet and packet.count("User:") >= 2:
+            if self.fail_goal_intake:
+                raise RuntimeError("model unavailable")
+            self.goal_intake_packets.append(packet or "")
+            user_turns = (packet or "").count("\nUser:")
+            if self.force_ready_on_first_goal_intake and packet and user_turns == 1:
                 return {
                     "status": "ready",
                     "question": "",
-                    "resolved_goal": "learn Kalman filters from a controls intuition perspective",
+                    "resolved_goal": "statistical modelling and prediction Both",
+                    "candidate_theme": "",
+                    "adjacent_concepts": [],
+                    "rationale": "Bad model response.",
+                }
+            if packet and "statistical modelling" in packet and user_turns == 1:
+                return {
+                    "status": "clarify",
+                    "question": "",
+                    "resolved_goal": "",
+                    "candidate_theme": "probabilistic modelling for prediction under uncertainty",
+                    "adjacent_concepts": [
+                        "Bayesian inference",
+                        "uncertainty calibration",
+                        "model checking",
+                        "decision-making under uncertainty",
+                    ],
+                    "rationale": "The user gave a cluster of examples around probabilistic modelling.",
+                }
+            if packet and "robotics better" in packet and user_turns == 1:
+                return {
+                    "status": "clarify",
+                    "resolved_goal": "",
+                    "question": "",
+                    "candidate_theme": "autonomous robotics as perception-action loops",
+                    "adjacent_concepts": [
+                        "state estimation",
+                        "world models",
+                        "planning under uncertainty",
+                        "feedback stability",
+                    ],
+                    "rationale": "The user gave a robotics topic cluster.",
+                }
+            if self.never_ready_goal_intake:
+                return {
+                    "status": "clarify",
+                    "question": "Do you want theory, practical application, or both?",
+                    "resolved_goal": "",
+                    "candidate_theme": "",
+                    "adjacent_concepts": [],
+                    "rationale": "Keep clarifying.",
+                }
+            if packet and user_turns >= 2:
+                if "statistical modelling" in packet:
+                    return {
+                        "status": "ready",
+                        "question": "",
+                        "resolved_goal": (
+                            "build practical and theoretical skill in probabilistic modelling for prediction "
+                            "and uncertainty"
+                        ),
+                        "candidate_theme": "",
+                        "adjacent_concepts": [],
+                        "rationale": "The learner accepted the central theme.",
+                    }
+                return {
+                    "status": "ready",
+                    "question": "",
+                    "resolved_goal": (
+                        "learn Kalman filters from a controls intuition perspective Both"
+                        if self.append_stray_both_to_goal
+                        else "learn Kalman filters from a controls intuition perspective"
+                    ),
+                    "candidate_theme": "",
+                    "adjacent_concepts": [],
                     "rationale": "The learner clarified the angle.",
                 }
             return {
                 "status": "clarify",
                 "question": "What angle should this goal take: intuition, math, or implementation?",
                 "resolved_goal": "",
+                "candidate_theme": "",
+                "adjacent_concepts": [],
                 "rationale": "The initial goal is broad.",
             }
         if task.name == "syllabus_planner":
@@ -219,6 +294,119 @@ def test_goal_creation_clarifies_before_creating_syllabus():
             assert "Created learning goal: Kalman Filters" in created.text
             assert session.mode == "goal"
             assert len(session.sql_db.get_active_goals("tester")) == 1
+            session.sql_db.close()
+        finally:
+            os.chdir(old_cwd)
+
+
+def test_goal_intake_forces_first_turn_clarification_even_if_model_says_ready():
+    with TemporaryDirectory() as dirname:
+        old_cwd = Path.cwd()
+        try:
+            session = make_session(Path(dirname))
+            session.agent.force_ready_on_first_goal_intake = True
+            first = session.handle(
+                "/goal I want to get better at statistical modelling and prediction. "
+                "Things like gaussian processes, monte carlo simulations, feature weighting based on covariance, etc"
+            )
+            assert "Here is the goal I would create" not in first.text
+            assert "cluster of examples" in first.text
+            assert session.mode == "goal_intake"
+            assert session.sql_db.get_active_goals("tester") == []
+            session.sql_db.close()
+        finally:
+            os.chdir(old_cwd)
+
+
+def test_goal_intake_uses_general_topic_shaping_for_example_clusters():
+    with TemporaryDirectory() as dirname:
+        old_cwd = Path.cwd()
+        try:
+            session = make_session(Path(dirname))
+            first = session.handle(
+                "/goal I want to get better at statistical modelling and prediction. "
+                "Things like gaussian processes, monte carlo simulations, feature weighting based on covariance, etc"
+            )
+            assert "probabilistic modelling for prediction under uncertainty" in first.text
+            assert "decision-making under uncertainty" in first.text
+            session.sql_db.close()
+        finally:
+            os.chdir(old_cwd)
+
+    with TemporaryDirectory() as dirname:
+        old_cwd = Path.cwd()
+        try:
+            robotics = make_session(Path(dirname))
+            second = robotics.handle(
+                "/goal I want to understand robotics better, like localization, path planning, "
+                "sensor fusion, and control loops"
+            )
+            assert "autonomous robotics as perception-action loops" in second.text
+            assert "world models" in second.text
+            robotics.sql_db.close()
+        finally:
+            os.chdir(old_cwd)
+
+
+def test_goal_intake_cleans_stray_option_suffix_from_resolved_goal():
+    with TemporaryDirectory() as dirname:
+        old_cwd = Path.cwd()
+        try:
+            session = make_session(Path(dirname))
+            session.agent.append_stray_both_to_goal = True
+            session.handle("/goal learn Kalman filters")
+            proposal = session.handle("controls intuition")
+            assert "Both" not in proposal.text
+            assert session.pending_resolved_goal == "learn Kalman filters from a controls intuition perspective"
+            session.sql_db.close()
+        finally:
+            os.chdir(old_cwd)
+
+
+def test_goal_intake_preserves_assistant_question_context_for_short_answers():
+    with TemporaryDirectory() as dirname:
+        old_cwd = Path.cwd()
+        try:
+            session = make_session(Path(dirname))
+            session.handle(
+                "/goal I want to get better at statistical modelling and prediction. "
+                "Things like gaussian processes, monte carlo simulations, feature weighting based on covariance, etc"
+            )
+            session.handle("Both")
+            packet = session.agent.goal_intake_packets[-1]
+            session.sql_db.close()
+            assert "Assistant:" in packet
+            assert "probabilistic modelling for prediction under uncertainty" in packet
+            assert "User: Both" in packet
+        finally:
+            os.chdir(old_cwd)
+
+
+def test_goal_intake_generic_fallback_when_model_is_unavailable():
+    with TemporaryDirectory() as dirname:
+        old_cwd = Path.cwd()
+        try:
+            session = make_session(Path(dirname))
+            session.agent.fail_goal_intake = True
+            response = session.handle("/goal a fuzzy cluster of examples")
+            assert "cluster of examples" in response.text
+            assert "central theme" in response.text
+            session.sql_db.close()
+        finally:
+            os.chdir(old_cwd)
+
+
+def test_goal_intake_carries_confirmed_adjacent_concepts_into_goal():
+    with TemporaryDirectory() as dirname:
+        old_cwd = Path.cwd()
+        try:
+            session = make_session(Path(dirname))
+            session.handle(
+                "/goal I want to get better at statistical modelling and prediction. "
+                "Things like gaussian processes, monte carlo simulations, feature weighting based on covariance, etc"
+            )
+            proposal = session.handle("Yes, include adjacent ideas too")
+            assert "decision-making under uncertainty" in proposal.text
             session.sql_db.close()
         finally:
             os.chdir(old_cwd)
@@ -460,6 +648,12 @@ if __name__ == "__main__":
     test_sql_database_can_be_used_from_worker_thread()
     test_goal_lifecycle_and_finalization()
     test_goal_creation_clarifies_before_creating_syllabus()
+    test_goal_intake_forces_first_turn_clarification_even_if_model_says_ready()
+    test_goal_intake_uses_general_topic_shaping_for_example_clusters()
+    test_goal_intake_cleans_stray_option_suffix_from_resolved_goal()
+    test_goal_intake_preserves_assistant_question_context_for_short_answers()
+    test_goal_intake_generic_fallback_when_model_is_unavailable()
+    test_goal_intake_carries_confirmed_adjacent_concepts_into_goal()
     test_goal_confirmation_can_be_revised_before_creation()
     test_one_off_question_does_not_create_goal()
     test_one_off_question_followups_share_open_session_until_switch()

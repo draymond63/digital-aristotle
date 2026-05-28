@@ -108,6 +108,9 @@ class LearningSession:
         self.active_topic_id: str | None = None
         self.active_syllabus_item_id: str | None = None
         self.goal_intake: list[str] = []
+        self.goal_intake_transcript: list[tuple[str, str]] = []
+        self.pending_goal_theme: str | None = None
+        self.pending_goal_adjacent: list[str] = []
         self.pending_resolved_goal: str | None = None
 
         self.goal_intake_task = Task(
@@ -183,6 +186,9 @@ class LearningSession:
                 return CommandResult(self.start_goal_intake(arg or None))
             case "/continue":
                 self.goal_intake = []
+                self.goal_intake_transcript = []
+                self.pending_goal_theme = None
+                self.pending_goal_adjacent = []
                 self.pending_resolved_goal = None
                 return CommandResult(self.continue_goal())
             case "/goals":
@@ -191,6 +197,9 @@ class LearningSession:
                 if not arg:
                     return CommandResult("Ask it like this: /ask what is covariance?")
                 self.goal_intake = []
+                self.goal_intake_transcript = []
+                self.pending_goal_theme = None
+                self.pending_goal_adjacent = []
                 self.pending_resolved_goal = None
                 return CommandResult(self.ask(arg))
             case "/done":
@@ -210,6 +219,9 @@ class LearningSession:
                 self.active_topic_id = None
                 self.active_syllabus_item_id = None
                 self.goal_intake = []
+                self.goal_intake_transcript = []
+                self.pending_goal_theme = None
+                self.pending_goal_adjacent = []
                 self.pending_resolved_goal = None
                 return CommandResult(f"Saved the previous conversation to {path}\nFresh session ready.")
             case "/help":
@@ -228,6 +240,9 @@ class LearningSession:
         self.active_topic_id = None
         self.active_syllabus_item_id = None
         self.goal_intake = []
+        self.goal_intake_transcript = []
+        self.pending_goal_theme = None
+        self.pending_goal_adjacent = []
         self.pending_resolved_goal = None
         if not initial_text:
             return (
@@ -241,6 +256,9 @@ class LearningSession:
             if self._is_goal_confirmation(text):
                 resolved_goal = self.pending_resolved_goal or self._fallback_resolved_goal()
                 self.goal_intake = []
+                self.goal_intake_transcript = []
+                self.pending_goal_theme = None
+                self.pending_goal_adjacent = []
                 self.pending_resolved_goal = None
                 prefix = f"Great. I will make this the track: {resolved_goal}\n\n"
                 return prefix + self.create_goal(resolved_goal)
@@ -248,9 +266,17 @@ class LearningSession:
             self.mode = "goal_intake"
 
         self.goal_intake.append(text.strip())
+        self.goal_intake_transcript.append(("user", text.strip()))
         decision = self._evaluate_goal_intake()
+        if len(self.goal_intake) == 1:
+            question = self._format_theme_clarification(decision)
+            self.goal_intake_transcript.append(("assistant", question))
+            return question
         if decision.get("status") == "ready" and decision.get("resolved_goal"):
-            resolved_goal = decision["resolved_goal"].strip()
+            resolved_goal = self._clean_resolved_goal(decision["resolved_goal"])
+            if not self._valid_resolved_goal(resolved_goal):
+                resolved_goal = self._fallback_resolved_goal()
+            resolved_goal = self._include_confirmed_adjacent_concepts(resolved_goal)
             self.pending_resolved_goal = resolved_goal
             self.mode = "goal_confirm"
             return (
@@ -259,17 +285,33 @@ class LearningSession:
                 "Reply yes to create it, or tell me what to change."
             )
         question = decision.get("question") or self._fallback_goal_clarification()
+        self.goal_intake_transcript.append(("assistant", question.strip()))
         return question.strip()
 
     def _evaluate_goal_intake(self) -> dict:
+        transcript = "\n".join(
+            f"{role.capitalize()}: {message}" for role, message in self.goal_intake_transcript
+        )
         packet = (
             f"User profile:\n{self.profile}\n\n"
             "Goal-intake conversation:\n"
-            + "\n".join(f"User: {message}" for message in self.goal_intake)
+            + transcript
         )
-        decision = self.agent.run_task_json(self.goal_intake_task, Conversation(), packet=packet)
+        try:
+            decision = self.agent.run_task_json(self.goal_intake_task, Conversation(), packet=packet)
+        except Exception:
+            decision = {}
         if not isinstance(decision, dict):
             return {"status": "clarify", "question": self._fallback_goal_clarification(), "resolved_goal": ""}
+        if len(self.goal_intake) < 2:
+            return {
+                "status": "clarify",
+                "question": decision.get("question") or self._fallback_goal_clarification(),
+                "resolved_goal": "",
+                "candidate_theme": decision.get("candidate_theme") or "",
+                "adjacent_concepts": decision.get("adjacent_concepts") or [],
+                "rationale": "Goal creation requires at least one clarification turn.",
+            }
         if len(self.goal_intake) >= 2 and decision.get("status") != "ready":
             return {
                 "status": "ready",
@@ -280,10 +322,92 @@ class LearningSession:
         return decision
 
     def _fallback_goal_clarification(self) -> str:
-        return "What would you like to be able to do or understand with this?"
+        return (
+            "I hear a cluster of examples, but not quite the center yet. "
+            "What central theme or capability are you hoping this turns into?"
+        )
 
     def _fallback_resolved_goal(self) -> str:
-        return " ".join(self.goal_intake).strip()
+        if self.pending_goal_theme:
+            adjacent = self._format_adjacent(self.pending_goal_adjacent)
+            if adjacent:
+                return f"build understanding of {self.pending_goal_theme}, including {adjacent}"
+            return f"build understanding of {self.pending_goal_theme}"
+        return self._clean_resolved_goal(" ".join(self.goal_intake).strip())
+
+    def _include_confirmed_adjacent_concepts(self, goal: str) -> str:
+        if not self.pending_goal_adjacent:
+            return goal
+        latest = normalize_identifier(self.goal_intake[-1]) if self.goal_intake else ""
+        acceptance_signals = ("yes", "include", "adjacent", "nearby", "that_is_the_center", "sounds_right")
+        if not any(signal in latest for signal in acceptance_signals):
+            return goal
+        missing = [
+            concept
+            for concept in self.pending_goal_adjacent
+            if not self._concept_already_covered(concept, goal)
+        ]
+        if not missing:
+            return goal
+        return f"{goal}, plus {self._format_adjacent(missing)}"
+
+    @staticmethod
+    def _concept_already_covered(concept: str, goal: str) -> bool:
+        concept_id = normalize_identifier(concept)
+        goal_id = normalize_identifier(goal)
+        if not concept_id:
+            return True
+        if concept_id in goal_id:
+            return True
+        parts = [part for part in concept_id.split("_and_") if part]
+        return any(part in goal_id for part in parts)
+
+    def _format_theme_clarification(self, decision: dict) -> str:
+        theme = self._clean_resolved_goal(str(decision.get("candidate_theme") or ""))
+        adjacent = [
+            self._clean_resolved_goal(str(item))
+            for item in (decision.get("adjacent_concepts") or [])
+            if str(item).strip()
+        ][:4]
+        if not theme:
+            question = decision.get("question") or self._fallback_goal_clarification()
+            return str(question).strip()
+        self.pending_goal_theme = theme
+        self.pending_goal_adjacent = adjacent
+        adjacent_text = self._format_adjacent(adjacent)
+        if adjacent_text:
+            return (
+                f"It sounds like the center might be {theme}. "
+                f"That could include {adjacent_text}. Is that the right center, or would you frame it differently?"
+            )
+        return f"It sounds like the center might be {theme}. Is that the right center, or would you frame it differently?"
+
+    @staticmethod
+    def _format_adjacent(items: list[str]) -> str:
+        if not items:
+            return ""
+        if len(items) == 1:
+            return items[0]
+        if len(items) == 2:
+            return f"{items[0]} and {items[1]}"
+        return f"{', '.join(items[:-1])}, and {items[-1]}"
+
+    @staticmethod
+    def _clean_resolved_goal(goal: str) -> str:
+        cleaned = " ".join(goal.split()).strip(" .")
+        stray_suffixes = (" Both", " both")
+        for suffix in stray_suffixes:
+            if cleaned.endswith(suffix):
+                cleaned = cleaned[: -len(suffix)].strip(" .")
+        return cleaned
+
+    def _valid_resolved_goal(self, goal: str) -> bool:
+        if not goal:
+            return False
+        lowered = goal.lower()
+        if "user:" in lowered or "assistant:" in lowered:
+            return False
+        return True
 
     @staticmethod
     def _is_goal_confirmation(text: str) -> bool:
@@ -495,6 +619,9 @@ class LearningSession:
         self.active_goal_id = None
         self.active_syllabus_item_id = None
         self.goal_intake = []
+        self.goal_intake_transcript = []
+        self.pending_goal_theme = None
+        self.pending_goal_adjacent = []
         self.pending_resolved_goal = None
         return report
 
