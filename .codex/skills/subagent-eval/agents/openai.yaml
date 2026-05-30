@@ -1,0 +1,4 @@
+interface:
+  display_name: "Subagent Eval"
+  short_description: "Run configurable subagent evals."
+  default_prompt: "Run a configurable subagent evaluation with N agents, progressive question sequences, and inspect stored knowledge afterward."
