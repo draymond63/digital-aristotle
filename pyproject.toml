@@ -17,6 +17,7 @@ dependencies = [
     "pytest",
     "transformers", # For tokenization
     "python-dotenv",
+    "pydantic",
 
     # Interface
     "python-telegram-bot",

@@ -51,8 +51,17 @@ def test_log_ask_stores_user_metadata():
     db = make_db()
     db.log_ask("what is covariance?", session_id=123, user_id="tester")
     collection = db.collection(Collection.PREVIOUS_ASKS)
-    assert collection.upserts[0]["ids"] == ["123"]
-    assert collection.upserts[0]["metadatas"] == [{"user_id": "tester"}]
+    assert collection.upserts[0]["ids"][0].startswith("123-")
+    assert collection.upserts[0]["metadatas"] == [{"session_id": "123", "user_id": "tester"}]
+
+
+def test_log_ask_uses_unique_ids_per_question():
+    db = make_db()
+    db.log_ask("what is covariance?", session_id=123, user_id="tester")
+    db.log_ask("give me a geometric example", session_id=123, user_id="tester")
+    collection = db.collection(Collection.PREVIOUS_ASKS)
+    assert collection.upserts[0]["ids"] != collection.upserts[1]["ids"]
+    assert collection.upserts[0]["metadatas"] == collection.upserts[1]["metadatas"]
 
 
 def test_query_filters_by_user_id():
@@ -83,6 +92,7 @@ def test_query_pretty_flattens_multiple_query_results():
 
 if __name__ == "__main__":
     test_log_ask_stores_user_metadata()
+    test_log_ask_uses_unique_ids_per_question()
     test_query_filters_by_user_id()
     test_query_pretty_flattens_multiple_query_results()
     print("vector database tests passed")

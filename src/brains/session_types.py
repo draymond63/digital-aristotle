@@ -47,6 +47,23 @@ class GraphUpdatesResponse(ResponseObject):
     edges: list[GraphEdgeResponse] = Field(default_factory=list)
 
 
+class SessionSummaryResponse(ResponseObject):
+    summary: str = ""
+    next_step: str = ""
+
+
+class SessionTopicUpdatesResponse(ResponseObject):
+    topic_updates: list[TopicUpdateResponse] = Field(default_factory=list)
+
+
+class SessionMemoryExtractionResponse(ResponseObject):
+    memories: list[MemoryUpdateResponse] = Field(default_factory=list)
+
+
+class SessionGraphUpdatesResponse(ResponseObject):
+    graph_updates: GraphUpdatesResponse = Field(default_factory=GraphUpdatesResponse)
+
+
 class SessionFinalizationResponse(ResponseObject):
     summary: str = ""
     next_step: str = ""
@@ -129,7 +146,6 @@ HELP_TEXT = """Commands:
 //save                   Save the current conversation without finalizing.
 //profile                Show your compact learner profile.
 //topic                  Show the current topic context.
-//new                    Save this conversation and start fresh.
 //help                   Show this help.
 //quit                   Save and exit.
 """

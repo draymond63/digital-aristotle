@@ -225,10 +225,16 @@ class SQLDatabase:
         topic_id = self.create_topic_id(topic or "")
         if not topic_id:
             return ""
-        self.cursor.execute("SELECT id FROM topics WHERE id = ?", (topic_id,))
-        row = self.cursor.fetchone()
-        if row:
-            return row["id"]
+        candidate_ids = [topic_id]
+        if topic_id.endswith("ies"):
+            candidate_ids.append(f"{topic_id[:-3]}y")
+        if topic_id.endswith("s"):
+            candidate_ids.append(topic_id[:-1])
+        for candidate_id in candidate_ids:
+            self.cursor.execute("SELECT id FROM topics WHERE id = ?", (candidate_id,))
+            row = self.cursor.fetchone()
+            if row:
+                return row["id"]
         self.cursor.execute("SELECT id, aliases_json FROM topics")
         for row in self.cursor.fetchall():
             try:

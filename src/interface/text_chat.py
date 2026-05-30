@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
-import traceback
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -23,6 +23,9 @@ from telegram.ext import (
 
 from brains.comms.onboarder import OnboardingBrain
 from brains.session import LearningSession
+
+
+logger = logging.getLogger(__name__)
 
 
 MAX_TELEGRAM_MESSAGE_CHARS = 3900
@@ -182,7 +185,7 @@ class TelegramTutorBot:
                 else:
                     reply = await asyncio.to_thread(self._route_reply, user_id, text)
             except Exception:
-                traceback.print_exc()
+                logger.exception(f"Unhandled Telegram routing error for user {user_id}")
                 reply = TelegramReply(
                     "Something went wrong while I was thinking. I logged the error in the bot console."
                 )

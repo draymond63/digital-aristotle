@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import shutil
 import sqlite3
 from datetime import datetime
@@ -11,6 +12,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 from brains.data.profile import normalize_identifier
+
+
+logger = logging.getLogger(__name__)
 
 
 DATA_DIR = ROOT / "data"
@@ -174,6 +178,7 @@ def delete_traceable_chroma_entries(user_id: str, session_ids: list[str]) -> dic
         from chromadb import PersistentClient
         from brains.data.db_vector import Collection
     except Exception as exc:
+        logger.exception(f"Could not import Chroma while resetting user {user_id}")
         return {"deleted": 0, "note": f"Could not import Chroma: {exc}"}
 
     client = PersistentClient(path=str(CHROMA_PATH))
@@ -190,6 +195,10 @@ def delete_traceable_chroma_entries(user_id: str, session_ids: list[str]) -> dic
         try:
             matching = collection.get(where={"user_id": {"$eq": user_id}}, include=[]).get("ids", [])
         except Exception:
+            logger.exception(
+                f"Failed to get Chroma entries by user metadata in collection {collection_name.value} "
+                f"for user {user_id}"
+            )
             matching = []
         if not matching and prefixes:
             ids = collection.get(include=[]).get("ids", [])

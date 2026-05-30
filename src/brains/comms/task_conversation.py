@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from datetime import datetime
 import json
+import logging
 from typing import TypeVar
 
 from brains.comms.agent_base import Agent, Conversation, ResponseObject, Task
 
 
 ResponseT = TypeVar("ResponseT", bound=ResponseObject)
+logger = logging.getLogger(__name__)
 
 
 class TaskConversation:
@@ -37,12 +39,20 @@ class TaskConversation:
         dynamic_prompts: list[str] | None = None,
         packet: str | None = None,
         visible: bool = False,
-    ) -> ResponseT:
+        default: ResponseT | None = None,
+        error_message: str | None = None,
+    ) -> ResponseT | None:
         conversation = conversation or self.convo
         log_conversation = log_conversation or conversation
         dynamic_prompts = dynamic_prompts or []
         input_messages = self.agent.build_task_messages(task, conversation, dynamic_prompts, packet)
-        result = self.agent.run_task_json(task, conversation, dynamic_prompts, packet)
+        try:
+            result = self.agent.run_task_json(task, conversation, dynamic_prompts, packet)
+        except Exception:
+            logger.exception(error_message or f"Failed to run {task.name}")
+            if default is None:
+                raise
+            return default
         log_conversation.append_task_result(
             task,
             json.dumps(result.json_data()),

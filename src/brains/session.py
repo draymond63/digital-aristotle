@@ -3,13 +3,17 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 import json
+import logging
 
 from brains.comms.agent_base import Agent, Conversation, Task, get_control_model, get_teacher_model
 from brains.comms.prompts_teacher import TEACHER_PROMPT
 from brains.comms.prompts_session import (
     PROFILE_UPDATE_GATE_PROMPT,
     QUESTION_TOPIC_RESOLUTION_PROMPT,
-    SESSION_FINALIZATION_PROMPT,
+    SESSION_GRAPH_UPDATES_PROMPT,
+    SESSION_MEMORY_EXTRACTION_PROMPT,
+    SESSION_SUMMARY_PROMPT,
+    SESSION_TOPIC_UPDATES_PROMPT,
     TOPIC_GRAPH_CONNECTION_PROMPT,
 )
 from brains.comms.task_conversation import TaskConversation
@@ -20,13 +24,22 @@ from brains.session_types import (
     CommandResult,
     FinalizationReport,
     HELP_TEXT,
+    GraphUpdatesResponse,
     MemoryUpdateResponse,
     ProfileUpdateGateResponse,
+    SessionGraphUpdatesResponse,
     QuestionTopicResolutionResponse,
     SessionFinalizationResponse,
+    SessionMemoryExtractionResponse,
     SessionMode,
+    SessionSummaryResponse,
+    SessionTopicUpdatesResponse,
+    TopicUpdateResponse,
     TopicGraphConnectionResponse,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 class LearningSession(TaskConversation):
@@ -57,15 +70,45 @@ class LearningSession(TaskConversation):
             temperature=0.35,
             num_predict=360,
         )
-        self.finalization_task = Task(
-            "session_finalizer",
-            SESSION_FINALIZATION_PROMPT,
+        self.summary_task = Task(
+            "session_summary",
+            SESSION_SUMMARY_PROMPT,
             model=get_control_model(),
             context_format="transcript",
             visible_history=None,
-            output_format=SessionFinalizationResponse,
+            output_format=SessionSummaryResponse,
             temperature=0.1,
-            num_predict=1000,
+            num_predict=300,
+        )
+        self.topic_updates_task = Task(
+            "session_topic_updates",
+            SESSION_TOPIC_UPDATES_PROMPT,
+            model=get_control_model(),
+            context_format="transcript",
+            visible_history=None,
+            output_format=SessionTopicUpdatesResponse,
+            temperature=0.1,
+            num_predict=700,
+        )
+        self.memory_extraction_task = Task(
+            "session_memory_extraction",
+            SESSION_MEMORY_EXTRACTION_PROMPT,
+            model=get_control_model(),
+            context_format="transcript",
+            visible_history=None,
+            output_format=SessionMemoryExtractionResponse,
+            temperature=0.1,
+            num_predict=700,
+        )
+        self.graph_updates_task = Task(
+            "session_graph_updates",
+            SESSION_GRAPH_UPDATES_PROMPT,
+            model=get_control_model(),
+            context_format="transcript",
+            visible_history=None,
+            output_format=SessionGraphUpdatesResponse,
+            temperature=0.1,
+            num_predict=900,
         )
         self.profile_update_gate_task = Task(
             "profile_update_gate",
@@ -113,6 +156,10 @@ class LearningSession(TaskConversation):
             case "/ask":
                 if not arg:
                     return CommandResult("Ask it like this: /ask what is covariance?")
+                if self.mode == "question" and self.active_session_id:
+                    report = self.finalize().render()
+                    response = self.ask(arg)
+                    return CommandResult(f"{report}\n\nNew question:\n{response}")
                 return CommandResult(self.ask(arg))
             case "/done":
                 return CommandResult(self.finalize().render())
@@ -122,13 +169,6 @@ class LearningSession(TaskConversation):
                 return CommandResult(self.render_profile())
             case "//topic":
                 return CommandResult(self.render_topic())
-            case "//new":
-                path = self.save_partial(close_status="saved")
-                self._reset_conversation()
-                self.mode = "idle"
-                self.active_session_id = None
-                self.active_topic_id = None
-                return CommandResult(f"Saved the previous conversation to {path}\nFresh session ready.")
             case "//help":
                 return CommandResult(HELP_TEXT)
             case "//quit" | "//exit":
@@ -166,12 +206,12 @@ class LearningSession(TaskConversation):
         conversation_path = self._write_conversation()
         backup_path = str(self.profile.backup())
         updates = self._finalize_updates()
-        summary = updates.get("summary") or "we made progress on the current question"
-        next_step = updates.get("next_step") or "continue from the last useful question"
+        summary = updates.summary or "we made progress on the current question"
+        next_step = updates.next_step or "continue from the last useful question"
 
-        topics_updated, topic_update_notes = self._apply_topic_updates(updates.get("topic_updates", []))
-        memories_saved = self._save_memories(updates.get("memories", []))
-        graph_changes = self._apply_graph_updates(updates.get("graph_updates", {}))
+        topics_updated, topic_update_notes = self._apply_topic_updates(updates.topic_updates)
+        memories_saved = self._save_memories(updates.memories)
+        graph_changes = self._apply_graph_updates(updates.graph_updates)
 
         if self.active_session_id:
             self.sql_db.finish_learning_session(
@@ -187,7 +227,7 @@ class LearningSession(TaskConversation):
             profile_backup_path=backup_path,
             conversation_path=conversation_path,
             summary=summary,
-            changes=updates,
+            changes=updates.json_data(),
         )
         report = FinalizationReport(
             summary=summary,
@@ -297,6 +337,9 @@ class LearningSession(TaskConversation):
                     user_id=self.user_id,
                 )
             except Exception:
+                logger.exception(
+                    f"Failed to query semantic memory collection {collection.value} for user {self.user_id}"
+                )
                 text = ""
             if text:
                 parts.append(f"{collection.value}:\n{text}")
@@ -326,17 +369,16 @@ class LearningSession(TaskConversation):
         conversation = Conversation()
         conversation.append_user(question)
         known_topics = self.sql_db.get_topic_summaries(limit=40)
-        try:
-            result = self.agent.run_task_json(
-                self.question_topic_task,
-                conversation,
-                dynamic_prompts=[
-                    f"User profile:\n{self.profile}",
-                    f"Known topic graph candidates:\n{json.dumps(known_topics, ensure_ascii=True)}",
-                ],
-            )
-        except Exception:
-            return []
+        result = self.run_task_json(
+            self.question_topic_task,
+            conversation,
+            dynamic_prompts=[
+                f"User profile:\n{self.profile}",
+                f"Known topic graph candidates:\n{json.dumps(known_topics, ensure_ascii=True)}",
+            ],
+            default=QuestionTopicResolutionResponse(),
+            error_message=f"Failed to resolve question topics for user {self.user_id}",
+        )
         topics = []
         for item in result.topics:
             topic_id = normalize_identifier(item.topic_id)
@@ -418,14 +460,13 @@ class LearningSession(TaskConversation):
             return []
         conversation = Conversation()
         conversation.append_user(f"New/resolved topic:\n{json.dumps(topic, ensure_ascii=True)}")
-        try:
-            result = self.agent.run_task_json(
-                self.topic_connection_task,
-                conversation,
-                dynamic_prompts=[f"Candidate existing graph topics:\n{json.dumps(candidates, ensure_ascii=True)}"],
-            )
-        except Exception:
-            return []
+        result = self.run_task_json(
+            self.topic_connection_task,
+            conversation,
+            dynamic_prompts=[f"Candidate existing graph topics:\n{json.dumps(candidates, ensure_ascii=True)}"],
+            default=TopicGraphConnectionResponse(),
+            error_message=f"Failed to evaluate topic graph connections for user {self.user_id} and topic {topic!r}",
+        )
         allowed_topics = {candidate["topic_id"] for candidate in candidates}
         connections = []
         for connection in result.connections:
@@ -461,47 +502,120 @@ class LearningSession(TaskConversation):
                 deduped.append(item)
         return deduped[:8]
 
-    def _finalize_updates(self) -> dict:
-        try:
-            result = self.run_task_json(self.finalization_task, self.conversation, visible=False)
-        except Exception:
-            result = SessionFinalizationResponse()
-        visible = list(self.conversation.visible_messages())
-        last_user = next((msg.content for msg in reversed(visible) if msg.role == "user"), "")
-        result.summary = result.summary or f"worked on {self.active_topic_id or 'a learning question'}"
-        result.next_step = result.next_step or "continue from the last question"
-        if last_user and not result.memories:
-            topic_id = self.active_topic_id or normalize_identifier(last_user)[:60] or "general_learning"
-            result.memories = [
-                MemoryUpdateResponse(
-                    type="insight",
-                    topic_id=topic_id,
-                    text=f"Recent learning thread included: {last_user}",
-                    confidence=0.4,
-                )
-            ]
-        return result.json_data()
+    def _finalize_updates(self) -> SessionFinalizationResponse:
+        summary_result = self.run_task_json(
+            self.summary_task,
+            self.conversation,
+            visible=False,
+            default=SessionSummaryResponse(),
+            error_message=f"Failed to run {self.summary_task.name} for user {self.user_id}",
+        )
+        topic_updates_result = self.run_task_json(
+            self.topic_updates_task,
+            self.conversation,
+            visible=False,
+            dynamic_prompts=[
+                f"Known global topic graph candidates:\n{json.dumps(self.sql_db.get_topic_summaries(limit=60), ensure_ascii=True)}"
+            ],
+            default=SessionTopicUpdatesResponse(),
+            error_message=f"Failed to run {self.topic_updates_task.name} for user {self.user_id}",
+        )
+        memories_result = self.run_task_json(
+            self.memory_extraction_task,
+            self.conversation,
+            visible=False,
+            default=SessionMemoryExtractionResponse(),
+            error_message=f"Failed to run {self.memory_extraction_task.name} for user {self.user_id}",
+        )
+        graph_updates_result = self.run_task_json(
+            self.graph_updates_task,
+            self.conversation,
+            visible=False,
+            dynamic_prompts=[
+                f"Known global topic graph candidates:\n{json.dumps(self.sql_db.get_topic_summaries(limit=60), ensure_ascii=True)}"
+            ],
+            default=SessionGraphUpdatesResponse(),
+            error_message=f"Failed to run {self.graph_updates_task.name} for user {self.user_id}",
+        )
+        return SessionFinalizationResponse(
+            summary=summary_result.summary or "summary unavailable because session summary extraction failed",
+            next_step=summary_result.next_step or "next step unavailable because session summary extraction failed",
+            topic_updates=topic_updates_result.topic_updates,
+            memories=memories_result.memories,
+            graph_updates=self._limit_graph_updates(graph_updates_result.graph_updates),
+        )
 
-    def _apply_topic_updates(self, updates: list[dict]) -> tuple[list[str], list[str]]:
+    def _limit_graph_updates(
+        self,
+        graph_updates: GraphUpdatesResponse,
+        max_topics: int = 3,
+        max_edges: int = 3,
+    ) -> GraphUpdatesResponse:
+        topics = list(graph_updates.topics)
+        edges = list(graph_updates.edges)
+        topics = sorted(
+            enumerate(topics),
+            key=lambda item: (float(item[1].confidence or 0.0), -item[0]),
+            reverse=True,
+        )
+        edges = sorted(
+            enumerate(edges),
+            key=lambda item: (float(item[1].confidence or 0.0), -item[0]),
+            reverse=True,
+        )
+        ranked_topics = [topic for _, topic in topics]
+        ranked_edges = [edge for _, edge in edges]
+        if len(topics) > max_topics:
+            logger.warning(
+                f"Truncating graph topic updates for user {self.user_id} "
+                f"from {len(topics)} to {max_topics}; "
+                f"dropped={[topic.json_data() for topic in ranked_topics[max_topics:]]!r}"
+            )
+        if len(edges) > max_edges:
+            logger.warning(
+                f"Truncating graph edge updates for user {self.user_id} "
+                f"from {len(edges)} to {max_edges}; "
+                f"dropped={[edge.json_data() for edge in ranked_edges[max_edges:]]!r}"
+            )
+        return GraphUpdatesResponse(
+            topics=ranked_topics[:max_topics],
+            edges=ranked_edges[:max_edges],
+        )
+
+    def _apply_topic_updates(self, updates: list[TopicUpdateResponse]) -> tuple[list[str], list[str]]:
         updated = []
         notes = []
         for item in updates:
-            topic_id = normalize_identifier(item.get("topic_id", ""))
-            evidence = item.get("evidence", "")
-            confidence = float(item.get("confidence", 0.0))
+            raw_topic_id = normalize_identifier(item.topic_id)
+            topic_id = self.sql_db.resolve_topic_id(raw_topic_id)
+            evidence = item.evidence
+            confidence = float(item.confidence)
             if not topic_id or not evidence or confidence < 0.45:
+                logger.warning(
+                    f"Skipping invalid or weak profile topic update for user {self.user_id}: {item.json_data()!r}"
+                )
                 continue
             gate = self._evaluate_topic_update(item)
             if not gate.get("accept"):
+                logger.info(
+                    f"Profile update rejected for user {self.user_id}: {item.json_data()!r}; "
+                    f"reason={gate.get('reason')!r}"
+                )
                 continue
             current = self.profile.topics.get(topic_id)
             values = {}
             for key in ("intuition", "details", "confidence"):
-                if key in item:
-                    proposed = float(item[key])
-                    previous = getattr(current, key, 0.0) if current else 0.0
-                    values[key] = max(0.0, min(1.0, max(previous, min(previous + 0.25, proposed))))
+                proposed = float(getattr(item, key))
+                previous = getattr(current, key, 0.0) if current else 0.0
+                values[key] = max(0.0, min(1.0, max(previous, min(previous + 0.25, proposed))))
             if values:
+                self.sql_db.upsert_topic(
+                    topic_id,
+                    name=topic_id.replace("_", " ").title(),
+                    aliases=[raw_topic_id],
+                    created_from=self.active_session_id,
+                    confidence=confidence,
+                )
                 self.profile.update_topic(topic_id, **values)
                 self.sql_db.cursor.execute(
                     """
@@ -522,32 +636,39 @@ class LearningSession(TaskConversation):
                 self.sql_db.conn.commit()
                 updated.append(topic_id)
                 notes.append(f"{topic_id}: {gate.get('reason') or evidence}")
+            else:
+                logger.warning(
+                    f"Profile topic update had no mastery values for user {self.user_id}: {item.json_data()!r}"
+                )
         return updated, notes
 
-    def _evaluate_topic_update(self, update: dict) -> dict:
-        try:
-            result = self.agent.run_task_json(
-                self.profile_update_gate_task,
-                self.conversation,
-                dynamic_prompts=[
-                    f"Current learner profile:\n{self.profile}",
-                    f"Proposed profile topic update:\n{json.dumps(update, ensure_ascii=True)}",
-                ],
-            )
-        except Exception:
-            return {"accept": False, "reason": "profile update gate was unavailable"}
+    def _evaluate_topic_update(self, update: TopicUpdateResponse) -> dict:
+        result = self.run_task_json(
+            self.profile_update_gate_task,
+            self.conversation,
+            dynamic_prompts=[
+                f"Current learner profile:\n{self.profile}",
+                f"Proposed profile topic update:\n{json.dumps(update.json_data(), ensure_ascii=True)}",
+            ],
+            default=ProfileUpdateGateResponse(reason="profile update gate was unavailable"),
+            error_message=f"Failed to evaluate profile update for user {self.user_id}: {update.json_data()!r}",
+        )
         return {
             "accept": bool(result.accept),
             "reason": result.reason.strip(),
         }
 
-    def _save_memories(self, memories: list[dict]) -> int:
+    def _save_memories(self, memories: list[MemoryUpdateResponse]) -> int:
         saved = 0
         for memory in memories:
-            text = memory.get("text", "").strip()
-            if not text or float(memory.get("confidence", 0.0)) < 0.35:
+            text = memory.text.strip()
+            if not text or float(memory.confidence) < 0.35:
+                logger.warning(f"Skipping invalid or weak memory for user {self.user_id}: {memory.json_data()!r}")
                 continue
-            memory_type = memory.get("type", "insight")
+            memory_type = memory.type
+            if memory_type not in {"insight", "confusion", "successful_explanation", "learning_preference"}:
+                logger.warning(f"Skipping memory with unknown type for user {self.user_id}: {memory.json_data()!r}")
+                continue
             collection = {
                 "confusion": Collection.CONFUSIONS,
                 "successful_explanation": Collection.SUCCESSFUL_EXPLANATIONS,
@@ -563,40 +684,45 @@ class LearningSession(TaskConversation):
                         {
                             "user_id": self.user_id,
                             "session_id": self.active_session_id or "",
-                            "topic_id": normalize_identifier(memory.get("topic_id", "")),
+                            "topic_id": normalize_identifier(memory.topic_id),
                             "memory_type": memory_type,
                         }
                     ],
                 )
                 saved += 1
             except Exception:
+                logger.exception(
+                    f"Failed to save memory for user {self.user_id} "
+                    f"in collection {collection.value}: {memory.json_data()!r}"
+                )
                 continue
         return saved
 
-    def _apply_graph_updates(self, graph_updates: dict) -> int:
+    def _apply_graph_updates(self, graph_updates: GraphUpdatesResponse) -> int:
         count = 0
         allowed_relations = {"prerequisite", "related", "part_of", "application_of", "enables"}
-        for topic in graph_updates.get("topics", []) or []:
-            topic_id = self.sql_db.resolve_topic_id(topic.get("topic_id", ""))
-            evidence = topic.get("evidence", "")
-            confidence = float(topic.get("confidence", 0.0))
+        for topic in graph_updates.topics:
+            topic_id = self.sql_db.resolve_topic_id(topic.topic_id)
+            evidence = topic.evidence
+            confidence = float(topic.confidence)
             if not topic_id or not evidence or confidence < 0.55:
+                logger.warning(f"Skipping invalid or weak graph topic update for user {self.user_id}: {topic.json_data()!r}")
                 continue
             self.sql_db.upsert_topic(
                 topic_id,
-                name=topic.get("name"),
-                description=topic.get("description"),
-                aliases=[topic.get("topic_id", ""), topic.get("name", "")],
+                name=topic.name,
+                description=topic.description,
+                aliases=[topic.topic_id, topic.name],
                 created_from=self.active_session_id,
                 confidence=confidence,
             )
             count += 1
-        for edge in graph_updates.get("edges", []) or []:
-            evidence = edge.get("evidence", "")
-            confidence = float(edge.get("confidence", 0.0))
-            relation_type = normalize_identifier(edge.get("relation_type", "related"))
-            topic1 = self.sql_db.resolve_topic_id(edge.get("topic1", ""))
-            topic2 = self.sql_db.resolve_topic_id(edge.get("topic2", ""))
+        for edge in graph_updates.edges:
+            evidence = edge.evidence
+            confidence = float(edge.confidence)
+            relation_type = normalize_identifier(edge.relation_type)
+            topic1 = self.sql_db.resolve_topic_id(edge.topic1)
+            topic2 = self.sql_db.resolve_topic_id(edge.topic2)
             if (
                 not evidence
                 or confidence < 0.55
@@ -605,12 +731,13 @@ class LearningSession(TaskConversation):
                 or not topic2
                 or topic1 == topic2
             ):
+                logger.warning(f"Skipping invalid or weak graph edge update for user {self.user_id}: {edge.json_data()!r}")
                 continue
             changed = self.sql_db.upsert_topic_edge(
                 topic1,
                 topic2,
                 relation_type,
-                confidence=float(edge.get("confidence", 0.5)),
+                confidence=confidence,
                 evidence=evidence,
                 session_id=self.active_session_id,
             )

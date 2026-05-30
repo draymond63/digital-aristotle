@@ -1,4 +1,5 @@
 from enum import StrEnum
+from hashlib import sha1
 
 
 class Collection(StrEnum):
@@ -16,11 +17,12 @@ class SemanticDatabase:
         self.client = PersistentClient(path=path)
 
     def log_ask(self, msg: str, session_id: int, user_id: str | None = None):
+        ask_id = sha1(f"{user_id or ''}:{session_id}:{msg}".encode("utf-8")).hexdigest()[:16]
         self.add(
             collection_name=Collection.PREVIOUS_ASKS,
-            ids=[str(session_id)],
+            ids=[f"{session_id}-{ask_id}"],
             documents=[msg],
-            metadatas=[self._metadata(user_id=user_id)] if user_id else None,
+            metadatas=[self._metadata(user_id=user_id, session_id=str(session_id))],
         )
 
     def find_asks(self, query: str, max_dist=0.5, user_id: str | None = None) -> list[str]:
