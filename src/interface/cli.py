@@ -21,14 +21,14 @@ def print_block(text: str):
 def run_cli(user_id: str):
     session = LearningSession(user_id=user_id)
     print_block(session.startup_message())
-    print("\nType /help for commands.")
+    print("\nType //help for commands.")
 
     while True:
         try:
             message = input(PROMPT).strip()
         except (EOFError, KeyboardInterrupt):
             print()
-            result = session.handle("/quit")
+            result = session.handle("//quit")
             print_block(result.text)
             break
 

@@ -106,22 +106,22 @@ class LearningSession(TaskConversation):
                 return CommandResult(self.ask(arg))
             case "/done":
                 return CommandResult(self.finalize().render())
-            case "/save":
+            case "//save":
                 return CommandResult(f"Saved conversation to {self.save_partial()}")
-            case "/profile":
+            case "//profile":
                 return CommandResult(self.render_profile())
-            case "/topic":
+            case "//topic":
                 return CommandResult(self.render_topic())
-            case "/new":
+            case "//new":
                 path = self.save_partial(close_status="saved")
                 self._reset_conversation()
                 self.mode = "idle"
                 self.active_session_id = None
                 self.active_topic_id = None
                 return CommandResult(f"Saved the previous conversation to {path}\nFresh session ready.")
-            case "/help":
+            case "//help":
                 return CommandResult(HELP_TEXT)
-            case "/quit" | "/exit":
+            case "//quit" | "//exit":
                 path = self.save_partial(close_status="saved")
                 return CommandResult(f"Saved conversation to {path}", should_quit=True)
             case _:

@@ -51,10 +51,10 @@ class FinalizationReport:
 HELP_TEXT = """Commands:
 /ask <question>          Ask a learning question.
 /done                    Finish this session and persist learning updates.
-/save                    Save the current conversation without finalizing.
-/profile                 Show your compact learner profile.
-/topic                   Show the current topic context.
-/new                     Save this conversation and start fresh.
-/help                    Show this help.
-/quit                    Save and exit.
+//save                   Save the current conversation without finalizing.
+//profile                Show your compact learner profile.
+//topic                  Show the current topic context.
+//new                    Save this conversation and start fresh.
+//help                   Show this help.
+//quit                   Save and exit.
 """

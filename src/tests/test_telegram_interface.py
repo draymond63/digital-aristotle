@@ -203,7 +203,7 @@ def test_onboarding_completion_creates_session_and_shows_options():
             ("Ask Question",),
             ("Done", "Profile", "Help"),
         )
-        assert bot._route_text(123, BUTTON_HELP) == "handled /help"
+        assert bot._route_text(123, BUTTON_HELP) == "handled //help"
         assert sessions["telegram_123"].calls[0] == "/ask how tiny games work"
 
 
@@ -258,8 +258,8 @@ def test_buttons_map_to_existing_commands():
         bot, sessions, _ = make_bot(Path(dirname))
         expected = {
             BUTTON_DONE: "/done",
-            BUTTON_PROFILE: "/profile",
-            BUTTON_HELP: "/help",
+            BUTTON_PROFILE: "//profile",
+            BUTTON_HELP: "//help",
         }
         for button, command in expected.items():
             assert bot._route_text(123, button) == f"handled {command}"
@@ -286,9 +286,9 @@ def test_slash_command_clears_pending_action():
     with TemporaryDirectory() as dirname:
         bot, sessions, _ = make_bot(Path(dirname))
         bot._route_text(123, BUTTON_ASK)
-        assert bot._route_text(123, "/help") == "handled /help"
+        assert bot._route_text(123, "//help") == "handled //help"
         assert bot._route_text(123, "plain followup") == "handled plain followup"
-        assert sessions["telegram_123"].calls == ["/help", "plain followup"]
+        assert sessions["telegram_123"].calls == ["//help", "plain followup"]
 
 
 def test_long_responses_are_split_into_safe_chunks():

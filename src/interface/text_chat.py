@@ -35,20 +35,13 @@ BUTTON_HELP = "Help"
 
 BUTTON_TO_COMMAND = {
     BUTTON_DONE: "/done",
-    BUTTON_PROFILE: "/profile",
-    BUTTON_HELP: "/help",
+    BUTTON_PROFILE: "//profile",
+    BUTTON_HELP: "//help",
 }
 
 COMMANDS = (
     "ask",
     "done",
-    "save",
-    "profile",
-    "topic",
-    "new",
-    "help",
-    "quit",
-    "exit",
 )
 
 
