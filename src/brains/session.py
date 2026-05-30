@@ -16,7 +16,17 @@ from brains.comms.task_conversation import TaskConversation
 from brains.data.db_sql import SQLDatabase
 from brains.data.db_vector import Collection, SemanticDatabase
 from brains.data.profile import Profile, normalize_identifier
-from brains.session_types import CommandResult, FinalizationReport, HELP_TEXT, SessionMode
+from brains.session_types import (
+    CommandResult,
+    FinalizationReport,
+    HELP_TEXT,
+    MemoryUpdateResponse,
+    ProfileUpdateGateResponse,
+    QuestionTopicResolutionResponse,
+    SessionFinalizationResponse,
+    SessionMode,
+    TopicGraphConnectionResponse,
+)
 
 
 class LearningSession(TaskConversation):
@@ -53,7 +63,7 @@ class LearningSession(TaskConversation):
             model=get_control_model(),
             context_format="transcript",
             visible_history=None,
-            output_format="json",
+            output_format=SessionFinalizationResponse,
             temperature=0.1,
             num_predict=1000,
         )
@@ -63,7 +73,7 @@ class LearningSession(TaskConversation):
             model=get_control_model(),
             context_format="transcript",
             visible_history=None,
-            output_format="json",
+            output_format=ProfileUpdateGateResponse,
             temperature=0.0,
             num_predict=180,
         )
@@ -71,7 +81,7 @@ class LearningSession(TaskConversation):
             "question_topic_resolver",
             QUESTION_TOPIC_RESOLUTION_PROMPT,
             model=get_control_model(),
-            output_format="json",
+            output_format=QuestionTopicResolutionResponse,
             temperature=0.0,
             num_predict=350,
         )
@@ -79,7 +89,7 @@ class LearningSession(TaskConversation):
             "topic_graph_connection",
             TOPIC_GRAPH_CONNECTION_PROMPT,
             model=get_control_model(),
-            output_format="json",
+            output_format=TopicGraphConnectionResponse,
             temperature=0.0,
             num_predict=450,
         )
@@ -327,19 +337,17 @@ class LearningSession(TaskConversation):
             )
         except Exception:
             return []
-        if not isinstance(result, dict):
-            return []
         topics = []
-        for item in result.get("topics") or []:
-            topic_id = normalize_identifier(item.get("topic_id", ""))
+        for item in result.topics:
+            topic_id = normalize_identifier(item.topic_id)
             if not topic_id:
                 continue
             topics.append(
                 {
                     "topic_id": self.sql_db.resolve_topic_id(topic_id),
-                    "name": item.get("name") or topic_id.replace("_", " ").title(),
-                    "description": item.get("description") or "",
-                    "confidence": float(item.get("confidence", 0.5)),
+                    "name": item.name or topic_id.replace("_", " ").title(),
+                    "description": item.description or "",
+                    "confidence": float(item.confidence),
                 }
             )
         return topics[:3]
@@ -418,15 +426,13 @@ class LearningSession(TaskConversation):
             )
         except Exception:
             return []
-        if not isinstance(result, dict):
-            return []
         allowed_topics = {candidate["topic_id"] for candidate in candidates}
         connections = []
-        for connection in result.get("connections") or []:
-            topic_id = self.sql_db.resolve_topic_id(connection.get("topic_id", ""))
+        for connection in result.connections:
+            topic_id = self.sql_db.resolve_topic_id(connection.topic_id)
             if topic_id not in allowed_topics:
                 continue
-            connections.append({**connection, "topic_id": topic_id})
+            connections.append({**connection.json_data(), "topic_id": topic_id})
         return connections
 
     @staticmethod
@@ -459,27 +465,22 @@ class LearningSession(TaskConversation):
         try:
             result = self.run_task_json(self.finalization_task, self.conversation, visible=False)
         except Exception:
-            result = {}
-        if not isinstance(result, dict):
-            result = {}
+            result = SessionFinalizationResponse()
         visible = list(self.conversation.visible_messages())
         last_user = next((msg.content for msg in reversed(visible) if msg.role == "user"), "")
-        result.setdefault("summary", f"worked on {self.active_topic_id or 'a learning question'}")
-        result.setdefault("next_step", "continue from the last question")
-        result.setdefault("topic_updates", [])
-        result.setdefault("memories", [])
-        result.setdefault("graph_updates", {"topics": [], "edges": []})
-        if last_user and not result["memories"]:
+        result.summary = result.summary or f"worked on {self.active_topic_id or 'a learning question'}"
+        result.next_step = result.next_step or "continue from the last question"
+        if last_user and not result.memories:
             topic_id = self.active_topic_id or normalize_identifier(last_user)[:60] or "general_learning"
-            result["memories"] = [
-                {
-                    "type": "insight",
-                    "topic_id": topic_id,
-                    "text": f"Recent learning thread included: {last_user}",
-                    "confidence": 0.4,
-                }
+            result.memories = [
+                MemoryUpdateResponse(
+                    type="insight",
+                    topic_id=topic_id,
+                    text=f"Recent learning thread included: {last_user}",
+                    confidence=0.4,
+                )
             ]
-        return result
+        return result.json_data()
 
     def _apply_topic_updates(self, updates: list[dict]) -> tuple[list[str], list[str]]:
         updated = []
@@ -535,11 +536,9 @@ class LearningSession(TaskConversation):
             )
         except Exception:
             return {"accept": False, "reason": "profile update gate was unavailable"}
-        if not isinstance(result, dict):
-            return {"accept": False, "reason": "profile update gate returned an invalid result"}
         return {
-            "accept": bool(result.get("accept")),
-            "reason": str(result.get("reason") or "").strip(),
+            "accept": bool(result.accept),
+            "reason": result.reason.strip(),
         }
 
     def _save_memories(self, memories: list[dict]) -> int:

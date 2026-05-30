@@ -11,6 +11,7 @@ authors = [{name = "Dan", email = "dan@raymond.ch"}]
 dependencies = [
     "ollama",
     "openai",
+    "pydantic",
     "chromadb",
     "pysqlite3",
     "pytest",

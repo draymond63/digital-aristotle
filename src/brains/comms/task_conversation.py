@@ -2,8 +2,12 @@ from __future__ import annotations
 
 from datetime import datetime
 import json
+from typing import TypeVar
 
-from brains.comms.agent_base import Agent, Conversation, Task
+from brains.comms.agent_base import Agent, Conversation, ResponseObject, Task
+
+
+ResponseT = TypeVar("ResponseT", bound=ResponseObject)
 
 
 class TaskConversation:
@@ -27,13 +31,13 @@ class TaskConversation:
 
     def run_task_json(
         self,
-        task: Task,
+        task: Task[ResponseT],
         conversation: Conversation | None = None,
         log_conversation: Conversation | None = None,
         dynamic_prompts: list[str] | None = None,
         packet: str | None = None,
         visible: bool = False,
-    ) -> dict | list:
+    ) -> ResponseT:
         conversation = conversation or self.convo
         log_conversation = log_conversation or conversation
         dynamic_prompts = dynamic_prompts or []
@@ -41,7 +45,7 @@ class TaskConversation:
         result = self.agent.run_task_json(task, conversation, dynamic_prompts, packet)
         log_conversation.append_task_result(
             task,
-            json.dumps(result),
+            json.dumps(result.json_data()),
             visible=visible,
             dynamic_prompts=dynamic_prompts,
             input_messages=input_messages,

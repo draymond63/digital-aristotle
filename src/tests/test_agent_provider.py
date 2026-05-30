@@ -2,7 +2,12 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 import os
 
-from brains.comms.agent_base import Agent, Task, get_control_model, get_teacher_model
+from brains.comms.agent_base import Agent, ResponseObject, Task, get_control_model, get_teacher_model
+
+
+class ExampleResponse(ResponseObject):
+    answer: str
+    confidence: float = 0.0
 
 
 def test_task_ollama_model_routes_to_ollama_client():
@@ -51,6 +56,30 @@ def test_openai_model_routes_to_openai_client():
 
     request = fake_client.chat.completions.create.call_args.kwargs
     assert request["model"] == "gpt-test"
+
+
+def test_json_task_coerces_response_object():
+    fake_client = Mock()
+    fake_client.chat.completions.create.return_value = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(content='{"answer": "hello", "confidence": 0.8}')
+            )
+        ]
+    )
+
+    with (
+        patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}, clear=True),
+        patch("brains.comms.agent_base.dotenv.load_dotenv"),
+        patch("brains.comms.agent_base.OpenAI", return_value=fake_client),
+    ):
+        agent = Agent()
+        task = Task("test_json", "Return JSON.", model="gpt-test", output_format=ExampleResponse)
+        result = agent.run_task_json(task)
+
+    assert result == ExampleResponse(answer="hello", confidence=0.8)
+    request = fake_client.chat.completions.create.call_args.kwargs
+    assert request["response_format"] == {"type": "json_object"}
 
 
 def test_missing_task_model_fails():
@@ -118,6 +147,7 @@ def test_can_mix_task_providers():
 if __name__ == "__main__":
     test_task_ollama_model_routes_to_ollama_client()
     test_openai_model_routes_to_openai_client()
+    test_json_task_coerces_response_object()
     test_missing_task_model_fails()
     test_model_helpers_use_local_models_without_use_api()
     test_model_helpers_use_api_model_when_use_api_is_present()

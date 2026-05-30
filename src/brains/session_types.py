@@ -3,8 +3,83 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
+from pydantic import Field
+
+from brains.comms.agent_base import ResponseObject
+
 
 SessionMode = Literal["idle", "question"]
+
+
+class TopicUpdateResponse(ResponseObject):
+    topic_id: str = ""
+    intuition: float = 0.0
+    details: float = 0.0
+    confidence: float = 0.0
+    evidence: str = ""
+
+
+class MemoryUpdateResponse(ResponseObject):
+    type: str = "insight"
+    topic_id: str = ""
+    text: str = ""
+    confidence: float = 0.0
+
+
+class GraphTopicResponse(ResponseObject):
+    topic_id: str = ""
+    name: str = ""
+    description: str = ""
+    confidence: float = 0.0
+    evidence: str = ""
+
+
+class GraphEdgeResponse(ResponseObject):
+    topic1: str = ""
+    topic2: str = ""
+    relation_type: str = "related"
+    confidence: float = 0.0
+    evidence: str = ""
+
+
+class GraphUpdatesResponse(ResponseObject):
+    topics: list[GraphTopicResponse] = Field(default_factory=list)
+    edges: list[GraphEdgeResponse] = Field(default_factory=list)
+
+
+class SessionFinalizationResponse(ResponseObject):
+    summary: str = ""
+    next_step: str = ""
+    topic_updates: list[TopicUpdateResponse] = Field(default_factory=list)
+    memories: list[MemoryUpdateResponse] = Field(default_factory=list)
+    graph_updates: GraphUpdatesResponse = Field(default_factory=GraphUpdatesResponse)
+
+
+class ProfileUpdateGateResponse(ResponseObject):
+    accept: bool = False
+    reason: str = ""
+
+
+class QuestionTopicResponse(ResponseObject):
+    topic_id: str = ""
+    name: str = ""
+    description: str = ""
+    confidence: float = 0.0
+
+
+class QuestionTopicResolutionResponse(ResponseObject):
+    topics: list[QuestionTopicResponse] = Field(default_factory=list)
+
+
+class TopicConnectionResponse(ResponseObject):
+    topic_id: str = ""
+    relation_type: str = "none"
+    confidence: float = 0.0
+    evidence: str = ""
+
+
+class TopicGraphConnectionResponse(ResponseObject):
+    connections: list[TopicConnectionResponse] = Field(default_factory=list)
 
 
 @dataclass

@@ -1,4 +1,4 @@
-from brains.comms.agent_base import Task, Conversation, get_control_model
+from brains.comms.agent_base import ResponseObject, Task, Conversation, get_control_model
 from brains.comms.prompts_onboarder import (
     ASSESSMENT_TRANSITION_PROMPT,
     ONBOARDING_COMPLETE_PROMPT,
@@ -11,7 +11,30 @@ from brains.comms.prompts_onboarder import (
 from brains.comms.task_conversation import TaskConversation
 from brains.data.profile import Profile
 from brains.data.profile import normalize_identifier
+from pydantic import Field
 
+
+class ProfileExtractionResponse(ResponseObject):
+    field: str = ""
+    confidence: float = 0.0
+    value: str = ""
+    signals: list[str] = Field(default_factory=list)
+    freeform_notes: str = ""
+    evidence: str = ""
+
+
+class ProfileSeedTopicResponse(ResponseObject):
+    intuition: float = 0.0
+    details: float = 0.0
+    confidence: float = 0.0
+
+
+class ProfileSeedResponse(ResponseObject):
+    background: dict[str, object] = Field(default_factory=dict)
+    topics: dict[str, ProfileSeedTopicResponse] = Field(default_factory=dict)
+    preferences: dict[str, list[str]] = Field(default_factory=dict)
+    interests: list[str] = Field(default_factory=list)
+    current_topics: list[str] = Field(default_factory=list)
 
 
 class OnboardingBrain(TaskConversation):
@@ -72,7 +95,7 @@ class OnboardingBrain(TaskConversation):
             model=get_control_model(),
             context_format="transcript",
             visible_history=8,
-            output_format="json",
+            output_format=ProfileExtractionResponse,
             temperature=0.0,
             num_predict=360,
         )
@@ -91,7 +114,7 @@ class OnboardingBrain(TaskConversation):
             model=get_control_model(),
             context_format="transcript",
             visible_history=None,
-            output_format="json",
+            output_format=ProfileSeedResponse,
             temperature=0.0,
             num_predict=700,
         )
@@ -248,23 +271,23 @@ class OnboardingBrain(TaskConversation):
         self.profile_seed = seed
         self.apply_profile_seed(seed)
 
-    def apply_profile_seed(self, seed: dict):
+    def apply_profile_seed(self, seed: ProfileSeedResponse):
         profile = Profile.load_user(self.username)
 
-        for category, value in seed.get("background", {}).items():
+        for category, value in seed.background.items():
             profile.update_background(category, value)
 
-        for topic_id, topic_state in seed.get("topics", {}).items():
-            profile.update_topic(topic_id, **topic_state)
+        for topic_id, topic_state in seed.topics.items():
+            profile.update_topic(topic_id, **topic_state.json_data())
 
-        for category, items in seed.get("preferences", {}).items():
+        for category, items in seed.preferences.items():
             for item in items:
                 profile.update_preferences(category, item)
 
-        for interest in seed.get("interests", []):
+        for interest in seed.interests:
             profile.update_interests(interest)
 
-        for topic_id in seed.get("current_topics", []):
+        for topic_id in seed.current_topics:
             profile.add_current_topic(topic_id)
 
     def _transition_packet(self, previous_section: Conversation, dimension: str, meaning: str):

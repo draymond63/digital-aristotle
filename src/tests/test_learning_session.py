@@ -35,7 +35,7 @@ class FakeAgent:
     def run_task_json(self, task, conversation, dynamic_prompts=None, packet=None):
         if task.name == "session_finalizer":
             self.finalized = True
-            return {
+            return task.output_format.model_validate({
                 "summary": "prediction/correction and uncertainty became clearer",
                 "next_step": "connect covariance to position and velocity",
                 "topic_updates": [
@@ -75,23 +75,23 @@ class FakeAgent:
                         }
                     ],
                 },
-            }
+            })
         if task.name == "profile_update_gate":
             self.profile_gate_packets.append("\n".join(dynamic_prompts or []))
-            return {
+            return task.output_format.model_validate({
                 "accept": self.profile_gate_accept,
                 "reason": (
                     "The learner paraphrased prediction and correction."
                     if self.profile_gate_accept
                     else "The transcript does not support the proposed update."
                 ),
-            }
+            })
         if task.name == "question_topic_resolver":
             context = "\n".join(dynamic_prompts or [])
             user_text = "\n".join(message.content for message in conversation.visible_messages())
             self.question_topic_packets.append(f"{context}\n{user_text}")
             if "widest direction" in user_text.lower():
-                return {
+                return task.output_format.model_validate({
                     "topics": [
                         {
                             "topic_id": "pca_variance_maximization",
@@ -100,9 +100,9 @@ class FakeAgent:
                             "confidence": 0.9,
                         }
                     ]
-                }
+                })
             if "http etag" in user_text.lower():
-                return {
+                return task.output_format.model_validate({
                     "topics": [
                         {
                             "topic_id": "http_cache_validation",
@@ -111,14 +111,16 @@ class FakeAgent:
                             "confidence": 0.9,
                         }
                     ]
-                }
-            return {"topics": [{"topic_id": "covariance", "name": "Covariance", "description": "", "confidence": 0.9}]}
+                })
+            return task.output_format.model_validate({
+                "topics": [{"topic_id": "covariance", "name": "Covariance", "description": "", "confidence": 0.9}]
+            })
         if task.name == "topic_graph_connection":
             context = "\n".join(dynamic_prompts or [])
             user_text = "\n".join(message.content for message in conversation.visible_messages())
             self.topic_connection_packets.append(f"{context}\n{user_text}")
             if "pca_variance_maximization" in user_text and "pca_eigenvectors_variance" in context:
-                return {
+                return task.output_format.model_validate({
                     "connections": [
                         {
                             "topic_id": "pca_eigenvectors_variance",
@@ -127,8 +129,8 @@ class FakeAgent:
                             "evidence": "Both topics concern PCA variance directions.",
                         }
                     ]
-                }
-            return {"connections": []}
+                })
+            return task.output_format.model_validate({"connections": []})
         raise AssertionError(f"Unexpected JSON task: {task.name}")
 
     def run_task(self, task, conversation, dynamic_prompts=None, packet=None):

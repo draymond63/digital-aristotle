@@ -1,32 +1,40 @@
 import json
 import os
 import dotenv
-from dataclasses import dataclass, asdict, field
-from typing import Generator, Literal, get_args
+from dataclasses import asdict, dataclass, field
+from typing import Any, Generator, Generic, Literal, TypeVar, get_args
 from ollama import Client
 from openai import OpenAI
+from pydantic import BaseModel, ConfigDict
 
 
 RoleType = Literal["user", "system", "assistant"]
 ROLES = get_args(RoleType)
 ContextFormat = Literal["messages", "transcript", "packet"]
-OutputFormat = Literal["text", "json"]
 ProviderType = Literal["ollama", "openai"]
 OPENAI_MODEL_PREFIXES = ("gpt-", "o1", "o3", "o4", "chatgpt-")
 LOCAL_TEACHER_MODEL = "phi4-mini:3.8b-q4_K_M"
 LOCAL_CONTROL_MODEL = "qwen2.5:3b-instruct-q4_K_M"
 API_TEACHER_MODEL = "gpt-4.1-mini"
+ResponseT = TypeVar("ResponseT", bound="ResponseObject")
+
+
+class ResponseObject(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    def json_data(self):
+        return self.model_dump()
 
 
 @dataclass(frozen=True)
-class Task:
+class Task(Generic[ResponseT]):
     name: str
     static_prompt: str
     model: str | None = None
     context_format: ContextFormat = "messages"
     visible_history: int | None = None
     dynamic_after_context: bool = False
-    output_format: OutputFormat = "text"
+    output_format: type[ResponseT] | None = None
     # Model parameters
     temperature: float = 0.5
     num_ctx: int = 4096
@@ -176,14 +184,16 @@ class Agent:
 
     def run_task_json(
         self,
-        task: Task,
+        task: Task[ResponseT],
         conversation: Conversation | None = None,
         dynamic_prompts: list[str] | None = None,
         packet: str | None = None,
-    ) -> dict | list:
+    ) -> ResponseT:
+        if task.output_format is None:
+            raise ValueError(f"Task {task.name} does not define a response object")
         response = self._generate_task(task, conversation, dynamic_prompts, packet, format="json")
         try:
-            return json.loads(self._message_content(response))
+            return task.output_format.model_validate(json.loads(self._message_content(response)))
         except Exception as e:
             raise RuntimeError(f"Failed to decode: {response}") from e
 
