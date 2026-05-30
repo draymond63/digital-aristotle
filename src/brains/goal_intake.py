@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from brains.comms.agent_base import Agent, Conversation, Task, get_control_model
-from brains.comms.prompts_session import GOAL_INTAKE_PROMPT
+from brains.comms.prompts_session import GOAL_INTAKE_EVALUATOR_PROMPT, GOAL_INTAKE_RESPONDER_PROMPT
 from brains.data.profile import Profile, normalize_identifier
 
 
@@ -24,23 +24,31 @@ class GoalIntake:
         self.reset_conversation = reset_conversation
         self.set_mode = set_mode
         self.messages: list[str] = []
-        self.transcript: list[tuple[str, str]] = []
+        self.conversation = Conversation()
         self.pending_theme: str | None = None
         self.pending_adjacent: list[str] = []
         self.pending_resolved_goal: str | None = None
-        self.task = Task(
-            "goal_intake",
-            GOAL_INTAKE_PROMPT,
+        self.evaluator_task = Task(
+            "goal_intake_evaluator",
+            GOAL_INTAKE_EVALUATOR_PROMPT,
             model=get_control_model(),
-            context_format="packet",
+            visible_history=None,
             output_format="json",
             temperature=0.1,
+            num_predict=220,
+        )
+        self.responder_task = Task(
+            "goal_intake_responder",
+            GOAL_INTAKE_RESPONDER_PROMPT,
+            model=get_control_model(),
+            visible_history=None,
+            temperature=0.35,
             num_predict=220,
         )
 
     def clear(self):
         self.messages = []
-        self.transcript = []
+        self.conversation = Conversation()
         self.pending_theme = None
         self.pending_adjacent = []
         self.pending_resolved_goal = None
@@ -58,22 +66,26 @@ class GoalIntake:
         return self.continue_intake(initial_text, mode="goal_intake")
 
     def continue_intake(self, text: str, mode: str) -> str:
+        if self.pending_resolved_goal and self._is_confirmation(text):
+            resolved_goal = self.pending_resolved_goal
+            self.clear()
+            prefix = f"Great. I will make this the track: {resolved_goal}\n\n"
+            return prefix + self.create_goal(resolved_goal)
+
         if mode == "goal_confirm":
-            if self._is_confirmation(text):
-                resolved_goal = self.pending_resolved_goal or self._fallback_resolved_goal()
-                self.clear()
-                prefix = f"Great. I will make this the track: {resolved_goal}\n\n"
-                return prefix + self.create_goal(resolved_goal)
-            self.pending_resolved_goal = None
             self.set_mode("goal_intake")
 
         self.messages.append(text.strip())
-        self.transcript.append(("user", text.strip()))
+        self.conversation.append_user(text.strip())
         decision = self._evaluate()
         if len(self.messages) == 1:
-            question = self._format_theme_clarification(decision)
-            self.transcript.append(("assistant", question))
-            return question
+            decision = {
+                **decision,
+                "status": "clarify",
+                "resolved_goal": "",
+                "response_intent": "shape_theme" if decision.get("candidate_theme") else "clarify_outcome",
+                "rationale": "Goal creation requires at least one clarification turn.",
+            }
         if decision.get("status") == "ready" and decision.get("resolved_goal"):
             resolved_goal = self._clean_resolved_goal(decision["resolved_goal"])
             if not self._valid_resolved_goal(resolved_goal):
@@ -81,46 +93,85 @@ class GoalIntake:
             resolved_goal = self._include_confirmed_adjacent_concepts(resolved_goal)
             self.pending_resolved_goal = resolved_goal
             self.set_mode("goal_confirm")
-            return (
-                f"Here is the goal I would create:\n"
-                f"{resolved_goal}\n\n"
-                "Reply yes to create it, or tell me what to change."
-            )
-        question = decision.get("question") or self._fallback_clarification()
-        self.transcript.append(("assistant", question.strip()))
-        return question.strip()
+            decision = {**decision, "resolved_goal": resolved_goal, "response_intent": "propose_goal"}
+        response = self._respond(decision)
+        self._append_intake_response(response)
+        return response
 
     def _evaluate(self) -> dict:
-        transcript = "\n".join(f"{role.capitalize()}: {message}" for role, message in self.transcript)
-        packet = f"User profile:\n{self.profile}\n\nGoal-intake conversation:\n{transcript}"
         try:
-            decision = self.agent.run_task_json(self.task, Conversation(), packet=packet)
+            decision = self.agent.run_task_json(
+                self.evaluator_task,
+                self.conversation,
+                dynamic_prompts=[f"User profile:\n{self.profile}"],
+            )
         except Exception:
-            decision = {}
+            return self._fallback_decision()
         if not isinstance(decision, dict):
-            return {"status": "clarify", "question": self._fallback_clarification(), "resolved_goal": ""}
+            return self._fallback_decision()
         if len(self.messages) < 2:
             return {
                 "status": "clarify",
-                "question": decision.get("question") or self._fallback_clarification(),
                 "resolved_goal": "",
                 "candidate_theme": decision.get("candidate_theme") or "",
                 "adjacent_concepts": decision.get("adjacent_concepts") or [],
+                "response_intent": decision.get("response_intent") or "shape_theme",
                 "rationale": "Goal creation requires at least one clarification turn.",
-            }
-        if len(self.messages) >= 2 and decision.get("status") != "ready":
-            return {
-                "status": "ready",
-                "resolved_goal": self._fallback_resolved_goal(),
-                "question": "",
-                "rationale": "Resolved after clarification turn.",
+                "fallback": bool(decision.get("fallback")),
             }
         return decision
 
-    @staticmethod
-    def _fallback_clarification() -> str:
+    def _respond(self, decision: dict) -> str:
+        self._store_candidate_context(decision)
+        if decision.get("fallback"):
+            return self._fallback_response(decision)
+        try:
+            response = self.agent.run_task(
+                self.responder_task,
+                self.conversation,
+                dynamic_prompts=[
+                    f"User profile:\n{self.profile}",
+                    f"Evaluator decision:\n{decision}",
+                ],
+            )
+        except Exception:
+            response = self._fallback_response(decision)
+        return response.strip() or self._fallback_response(decision)
+
+    def _append_intake_response(self, text: str):
+        self.conversation.append_task_result(self.responder_task, text)
+
+    def _fallback_decision(self) -> dict:
+        return {
+            "status": "clarify",
+            "resolved_goal": "",
+            "candidate_theme": self.pending_theme or "",
+            "adjacent_concepts": self.pending_adjacent,
+            "response_intent": "clarify_outcome",
+            "rationale": "Could not evaluate confidently.",
+            "fallback": True,
+        }
+
+    def _fallback_response(self, decision: dict) -> str:
+        if decision.get("status") == "ready" and decision.get("resolved_goal"):
+            return (
+                f"This is the track I would make: {decision['resolved_goal']}\n\n"
+                "Say 'create it' when that feels right, or tell me what still feels off."
+            )
+        theme = decision.get("candidate_theme") or self.pending_theme
+        adjacent = self._format_adjacent(decision.get("adjacent_concepts") or self.pending_adjacent)
+        if theme and adjacent:
+            return (
+                f"I think the center might be {theme}. It could branch into {adjacent}.\n\n"
+                "Which part feels closest to what you actually want to be able to do?"
+            )
+        if theme:
+            return (
+                f"I think the center might be {theme}.\n\n"
+                "What would make that useful for you: intuition, practical use, or deeper theory?"
+            )
         return (
-            "I hear a cluster of examples, but not quite the center yet. "
+            "I hear a cluster of examples, but not quite the center yet.\n\n"
             "What central theme or capability are you hoping this turns into?"
         )
 
@@ -148,6 +199,18 @@ class GoalIntake:
             return goal
         return f"{goal}, plus {self._format_adjacent(missing)}"
 
+    def _store_candidate_context(self, decision: dict):
+        theme = self._clean_resolved_goal(str(decision.get("candidate_theme") or ""))
+        adjacent = [
+            self._clean_resolved_goal(str(item))
+            for item in (decision.get("adjacent_concepts") or [])
+            if str(item).strip()
+        ][:4]
+        if theme:
+            self.pending_theme = theme
+        if adjacent:
+            self.pending_adjacent = adjacent
+
     @staticmethod
     def _concept_already_covered(concept: str, goal: str) -> bool:
         concept_id = normalize_identifier(concept)
@@ -158,26 +221,6 @@ class GoalIntake:
             return True
         parts = [part for part in concept_id.split("_and_") if part]
         return any(part in goal_id for part in parts)
-
-    def _format_theme_clarification(self, decision: dict) -> str:
-        theme = self._clean_resolved_goal(str(decision.get("candidate_theme") or ""))
-        adjacent = [
-            self._clean_resolved_goal(str(item))
-            for item in (decision.get("adjacent_concepts") or [])
-            if str(item).strip()
-        ][:4]
-        if not theme:
-            question = decision.get("question") or self._fallback_clarification()
-            return str(question).strip()
-        self.pending_theme = theme
-        self.pending_adjacent = adjacent
-        adjacent_text = self._format_adjacent(adjacent)
-        if adjacent_text:
-            return (
-                f"It sounds like the center might be {theme}. "
-                f"That could include {adjacent_text}. Is that the right center, or would you frame it differently?"
-            )
-        return f"It sounds like the center might be {theme}. Is that the right center, or would you frame it differently?"
 
     @staticmethod
     def _format_adjacent(items: list[str]) -> str:

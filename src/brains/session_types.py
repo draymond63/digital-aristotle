@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 
-SessionMode = Literal["idle", "goal_intake", "goal_confirm", "goal", "question"]
+SessionMode = Literal["idle", "goal_intake", "goal_confirm", "syllabus_review", "goal", "question"]
 
 
 @dataclass

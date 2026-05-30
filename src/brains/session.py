@@ -7,9 +7,12 @@ import json
 from brains.comms.agent_base import Agent, Conversation, Task, get_control_model, get_teacher_model
 from brains.comms.prompts_teacher import TEACHER_PROMPT
 from brains.comms.prompts_session import (
+    PROFILE_UPDATE_GATE_PROMPT,
+    QUESTION_TOPIC_RESOLUTION_PROMPT,
     QUESTION_GOAL_LINK_PROMPT,
     SESSION_FINALIZATION_PROMPT,
     SYLLABUS_PROMPT,
+    TOPIC_GRAPH_CONNECTION_PROMPT,
 )
 from brains.comms.task_conversation import TaskConversation
 from brains.data.db_sql import SQLDatabase
@@ -61,7 +64,6 @@ class LearningSession(TaskConversation):
             "syllabus_planner",
             SYLLABUS_PROMPT,
             model=get_control_model(),
-            context_format="packet",
             output_format="json",
             temperature=0.2,
             num_predict=700,
@@ -76,11 +78,36 @@ class LearningSession(TaskConversation):
             temperature=0.1,
             num_predict=1000,
         )
+        self.profile_update_gate_task = Task(
+            "profile_update_gate",
+            PROFILE_UPDATE_GATE_PROMPT,
+            model=get_control_model(),
+            context_format="transcript",
+            visible_history=None,
+            output_format="json",
+            temperature=0.0,
+            num_predict=180,
+        )
+        self.question_topic_task = Task(
+            "question_topic_resolver",
+            QUESTION_TOPIC_RESOLUTION_PROMPT,
+            model=get_control_model(),
+            output_format="json",
+            temperature=0.0,
+            num_predict=350,
+        )
+        self.topic_connection_task = Task(
+            "topic_graph_connection",
+            TOPIC_GRAPH_CONNECTION_PROMPT,
+            model=get_control_model(),
+            output_format="json",
+            temperature=0.0,
+            num_predict=450,
+        )
         self.question_link_task = Task(
             "question_goal_linker",
             QUESTION_GOAL_LINK_PROMPT,
             model=get_control_model(),
-            context_format="packet",
             output_format="json",
             temperature=0.0,
             num_predict=160,
@@ -96,11 +123,23 @@ class LearningSession(TaskConversation):
 
     @property
     def goal_intake_transcript(self) -> list[tuple[str, str]]:
-        return self.goal_intake_flow.transcript
+        return [
+            (message.role, message.content)
+            for message in self.goal_intake_flow.conversation.visible_messages()
+        ]
 
     @goal_intake_transcript.setter
     def goal_intake_transcript(self, value: list[tuple[str, str]]):
-        self.goal_intake_flow.transcript = value
+        self.goal_intake_flow.conversation = Conversation()
+        for role, content in value:
+            if role == "user":
+                self.goal_intake_flow.conversation.append_user(content)
+            else:
+                self.goal_intake_flow.conversation.append_task_result(
+                    self.goal_intake_flow.responder_task,
+                    content,
+                    role="assistant",
+                )
 
     @property
     def pending_goal_theme(self) -> str | None:
@@ -151,6 +190,8 @@ class LearningSession(TaskConversation):
             return self.handle_command(text)
         if self.mode in {"goal_intake", "goal_confirm"}:
             return CommandResult(self.goal_intake_flow.continue_intake(text, self.mode))
+        if self.mode == "syllabus_review" and self.active_goal_id:
+            return CommandResult(self._handle_syllabus_review(text))
         if self.mode == "goal" and self.active_goal_id:
             return CommandResult(self._goal_turn(text))
         return CommandResult(self.ask(text))
@@ -236,28 +277,16 @@ class LearningSession(TaskConversation):
         self.sql_db.create_syllabus(goal_id, title, plan["milestones"])
         self.active_goal_id = goal_id
         self.active_topic_id = topic_id
-        self.mode = "goal"
-        self.active_session_id = self.sql_db.create_goal_session(
-            self.user_id,
-            session_type="goal",
-            goal_id=goal_id,
-            metadata={"target": target},
-        )
-        self._reset_conversation()
-        self._apply_goal_context()
-        first_item = self.sql_db.get_current_syllabus_item(goal_id)
-        if first_item:
-            self.active_syllabus_item_id = first_item["id"]
-            self.sql_db.update_syllabus_item(first_item["id"], status="active")
+        self.mode = "syllabus_review"
+        self.active_session_id = None
+        self.active_syllabus_item_id = None
 
         syllabus = self._render_syllabus(goal_id)
-        first_prompt = first_item["objective"] if first_item else target
-        response = self._goal_turn(f"Start this learning goal: {first_prompt}")
         return (
             f"Created learning goal: {title}\n\n"
             f"{syllabus}\n\n"
-            "Starting with the first milestone.\n\n"
-            f"{response}"
+            "Take a look at the syllabus before we start. "
+            "Say 'looks good' to begin, or tell me what to add, remove, reorder, or change."
         )
 
     def _find_duplicate_goal(self, title: str, target: str, topic_id: str):
@@ -296,6 +325,80 @@ class LearningSession(TaskConversation):
             f"Current milestone: {item['title'] if item else 'open exploration'}\n"
             f"Next step: {goal.get('next_step') or (item.get('objective') if item else 'continue the lesson')}"
         )
+
+    def _handle_syllabus_review(self, text: str) -> str:
+        if self._is_syllabus_approval(text):
+            return self._begin_goal_lesson()
+        self._revise_syllabus(text)
+        return (
+            f"Updated syllabus:\n{self._render_syllabus(self.active_goal_id)}\n\n"
+            "How does this look? Say 'looks good' to begin, or keep refining it."
+        )
+
+    def _begin_goal_lesson(self) -> str:
+        if not self.active_goal_id:
+            return "No active goal is waiting for a syllabus review. Start one with /goal <topic>."
+        goal = self.sql_db.get_goal(self.active_goal_id)
+        self.mode = "goal"
+        self.active_session_id = self.sql_db.create_goal_session(
+            self.user_id,
+            session_type="goal",
+            goal_id=self.active_goal_id,
+            metadata={"target": goal["target"], "started_after_syllabus_review": True},
+        )
+        self._reset_conversation()
+        self._apply_goal_context()
+        first_item = self.sql_db.get_current_syllabus_item(self.active_goal_id)
+        if first_item:
+            self.active_syllabus_item_id = first_item["id"]
+            self.sql_db.update_syllabus_item(first_item["id"], status="active")
+        first_prompt = first_item["objective"] if first_item else goal["target"]
+        response = self._goal_turn(f"Start this learning goal: {first_prompt}")
+        return f"Great. Syllabus saved.\n\nStarting with the first milestone.\n\n{response}"
+
+    def _revise_syllabus(self, feedback: str):
+        goal = self.sql_db.get_goal(self.active_goal_id)
+        current_syllabus = self._render_syllabus(self.active_goal_id)
+        conversation = Conversation()
+        conversation.append_user(
+            f"Requested syllabus change:\n{feedback}\n\n"
+            "Revise the syllabus to reflect the requested change."
+        )
+        dynamic_prompts = [
+            f"User profile:\n{self.profile}",
+            f"Requested goal:\n{goal['target']}",
+            f"Current syllabus:\n{current_syllabus}",
+        ]
+        try:
+            plan = self.agent.run_task_json(self.syllabus_task, conversation, dynamic_prompts=dynamic_prompts)
+        except Exception:
+            plan = {}
+        milestones = plan.get("milestones") if isinstance(plan, dict) else None
+        if not milestones:
+            return
+        title = plan.get("title") or goal["title"]
+        self.sql_db.replace_syllabus(self.active_goal_id, title, self._calibrate_milestones(goal["target"], milestones[:6]))
+
+    @staticmethod
+    def _is_syllabus_approval(text: str) -> bool:
+        normalized = normalize_identifier(text)
+        return normalized in {
+            "yes",
+            "y",
+            "yep",
+            "yeah",
+            "looks_good",
+            "looks_good_to_me",
+            "good",
+            "start",
+            "start_it",
+            "begin",
+            "begin_lesson",
+            "go",
+            "go_ahead",
+            "approved",
+            "approve",
+        }
 
     def ask(self, question: str) -> str:
         if self.mode != "question" or not self.active_session_id:
@@ -496,13 +599,14 @@ class LearningSession(TaskConversation):
         yield from self.stream_task(self.teacher_task, self.conversation, dynamic_prompts=dynamic_prompts)
 
     def _generate_syllabus(self, target: str) -> dict:
-        packet = (
-            f"User profile:\n{self.profile}\n\n"
-            f"Requested goal:\n{target}\n\n"
-            f"Related topic context:\n{self.sql_db.get_related_topics_pretty([normalize_identifier(target)])}"
-        )
+        conversation = Conversation()
+        conversation.append_user(f"Requested goal:\n{target}")
+        dynamic_prompts = [
+            f"User profile:\n{self.profile}",
+            f"Related topic context:\n{self.sql_db.get_related_topics_pretty([normalize_identifier(target)])}",
+        ]
         try:
-            plan = self.agent.run_task_json(self.syllabus_task, Conversation(), packet=packet)
+            plan = self.agent.run_task_json(self.syllabus_task, conversation, dynamic_prompts=dynamic_prompts)
         except Exception:
             plan = {}
         milestones = plan.get("milestones") if isinstance(plan, dict) else None
@@ -588,7 +692,7 @@ class LearningSession(TaskConversation):
             f"{item['position']}. {item['title']} [{item['status']}]: {item.get('objective') or ''}"
             for item in items
         )
-        memories = self._query_memories(goal["target"])
+        memories = self._query_memories(goal["target"], topic_hints=[goal.get("target_topic_id") or goal["target"]])
         self.teacher_context = (
             f"User profile:\n{self.profile}\n\n"
             f"Active long-term goal:\n{goal['title']}\n"
@@ -612,12 +716,18 @@ class LearningSession(TaskConversation):
         return (
             f"User profile:\n{self.profile}\n\n"
             f"{goal_text}"
-            f"Relevant memories:\n{self._query_memories(question)}\n\n"
-            "Answer this as a one-off question. Keep it useful and lightweight."
+            f"Relevant memories:\n{self._query_memories(question, topic_hints=self._graph_connected_profile_topic_hints(question))}\n\n"
+            "Answer this as a one-off learning turn. Keep it useful and lightweight.\n"
+            "Use the learner's own wording as the starting point, not a generic overview.\n"
+            "If they propose a mental model, sharpen that model and explain the practical consequence.\n"
+            "If they say they are fuzzy, answer the fuzzy distinction directly before offering advice.\n"
+            "When relevant memories are retrieved, use them to continue the prior line of reasoning rather than restarting from a generic explanation.\n"
+            "Avoid broad comparison lists unless the learner explicitly asks for a list."
         )
 
-    def _query_memories(self, query: str) -> str:
+    def _query_memories(self, query: str, topic_hints: list[str] | None = None) -> str:
         parts = []
+        queries = self._memory_queries(query, topic_hints)
         for collection in (
             Collection.INSIGHTS,
             Collection.CONFUSIONS,
@@ -627,7 +737,7 @@ class LearningSession(TaskConversation):
             try:
                 text = self.vector_db.query_pretty(
                     collection_name=collection,
-                    query_texts=[query],
+                    query_texts=queries,
                     n_results=3,
                     user_id=self.user_id,
                 )
@@ -637,29 +747,191 @@ class LearningSession(TaskConversation):
                 parts.append(f"{collection.value}:\n{text}")
         return "\n\n".join(parts) if parts else "none retrieved"
 
+    def _profile_topic_hints(self) -> list[str]:
+        return [
+            topic_id
+            for topic_id, state in sorted(
+                self.profile.topics.items(),
+                key=lambda item: (item[1].confidence, item[1].intuition, item[1].details),
+                reverse=True,
+            )[:5]
+        ]
+
+    def _graph_connected_profile_topic_hints(self, question: str) -> list[str]:
+        profile_topics = self._profile_topic_hints()
+        if not profile_topics:
+            return []
+        question_topics = self._resolve_question_topics(question)
+        if not question_topics:
+            return []
+        placed_topics = self._place_question_topics(question_topics)
+        return self.sql_db.connected_targets(placed_topics, profile_topics, max_hops=2)
+
+    def _resolve_question_topics(self, question: str) -> list[str]:
+        conversation = Conversation()
+        conversation.append_user(question)
+        known_topics = self.sql_db.get_topic_summaries(limit=40)
+        try:
+            result = self.agent.run_task_json(
+                self.question_topic_task,
+                conversation,
+                dynamic_prompts=[
+                    f"User profile:\n{self.profile}",
+                    f"Known topic graph candidates:\n{json.dumps(known_topics, ensure_ascii=True)}",
+                ],
+            )
+        except Exception:
+            return []
+        if not isinstance(result, dict):
+            return []
+        topics = []
+        for item in result.get("topics") or []:
+            topic_id = normalize_identifier(item.get("topic_id", ""))
+            if not topic_id:
+                continue
+            topics.append(
+                {
+                    "topic_id": self.sql_db.resolve_topic_id(topic_id),
+                    "name": item.get("name") or topic_id.replace("_", " ").title(),
+                    "description": item.get("description") or "",
+                    "confidence": float(item.get("confidence", 0.5)),
+                }
+            )
+        return topics[:3]
+
+    def _place_question_topics(self, topics: list[dict]) -> list[str]:
+        placed = []
+        candidates = self.sql_db.get_topic_summaries(limit=60)
+        for topic in topics:
+            topic_id = normalize_identifier(topic.get("topic_id", ""))
+            if not topic_id:
+                continue
+            resolved = self.sql_db.resolve_topic_id(topic_id)
+            if self.sql_db.topic_exists(resolved):
+                placed.append(resolved)
+                continue
+            connections = self._evaluate_topic_connections(topic, candidates)
+            same_as = self._best_same_as(connections)
+            if same_as:
+                placed.append(same_as)
+                continue
+            strong_connections = [
+                connection
+                for connection in connections
+                if normalize_identifier(connection.get("relation_type", "")) in {
+                    "prerequisite",
+                    "related",
+                    "part_of",
+                    "application_of",
+                    "enables",
+                }
+                and float(connection.get("confidence", 0.0)) >= 0.65
+                and self.sql_db.resolve_topic_id(connection.get("topic_id", ""))
+                and self.sql_db.resolve_topic_id(connection.get("topic_id", "")) != resolved
+            ]
+            if not strong_connections:
+                if float(topic.get("confidence", 0.0)) >= 0.65:
+                    self.sql_db.upsert_topic(
+                        resolved,
+                        name=topic.get("name"),
+                        description=topic.get("description"),
+                        confidence=float(topic.get("confidence", 0.65)),
+                    )
+                placed.append(resolved)
+                continue
+            self.sql_db.upsert_topic(
+                resolved,
+                name=topic.get("name"),
+                description=topic.get("description"),
+                confidence=0.45,
+            )
+            placed.append(resolved)
+            for connection in strong_connections:
+                relation = normalize_identifier(connection.get("relation_type", ""))
+                confidence = float(connection.get("confidence", 0.0))
+                target = self.sql_db.resolve_topic_id(connection.get("topic_id", ""))
+                self.sql_db.upsert_topic_edge(
+                    resolved,
+                    target,
+                    relation,
+                    confidence=confidence,
+                    evidence=connection.get("evidence"),
+                    session_id=self.active_session_id,
+                )
+        return placed
+
+    def _evaluate_topic_connections(self, topic: dict, candidates: list[dict]) -> list[dict]:
+        if not candidates:
+            return []
+        conversation = Conversation()
+        conversation.append_user(f"New/resolved topic:\n{json.dumps(topic, ensure_ascii=True)}")
+        try:
+            result = self.agent.run_task_json(
+                self.topic_connection_task,
+                conversation,
+                dynamic_prompts=[f"Candidate existing graph topics:\n{json.dumps(candidates, ensure_ascii=True)}"],
+            )
+        except Exception:
+            return []
+        if not isinstance(result, dict):
+            return []
+        allowed_topics = {candidate["topic_id"] for candidate in candidates}
+        connections = []
+        for connection in result.get("connections") or []:
+            topic_id = self.sql_db.resolve_topic_id(connection.get("topic_id", ""))
+            if topic_id not in allowed_topics:
+                continue
+            connections.append({**connection, "topic_id": topic_id})
+        return connections
+
+    @staticmethod
+    def _best_same_as(connections: list[dict]) -> str | None:
+        same_as = [
+            connection
+            for connection in connections
+            if normalize_identifier(connection.get("relation_type", "")) == "same_as"
+            and float(connection.get("confidence", 0.0)) >= 0.85
+        ]
+        if not same_as:
+            return None
+        return max(same_as, key=lambda item: float(item.get("confidence", 0.0)))["topic_id"]
+
+    @staticmethod
+    def _memory_queries(query: str, topic_hints: list[str] | None = None) -> list[str]:
+        queries = [query]
+        for topic_id in topic_hints or []:
+            readable = topic_id.replace("_", " ").strip()
+            if readable:
+                queries.append(f"{query}\nRelated learner topic: {readable}")
+                queries.append(readable)
+        deduped = []
+        for item in queries:
+            if item and item not in deduped:
+                deduped.append(item)
+        return deduped[:8]
+
     def _maybe_link_question_to_goal(self, question: str):
         if not self.active_session_id:
             return
         goals = self.sql_db.get_active_goals(self.user_id)
         if not goals:
             return
-        packet = {
-            "question": question,
-            "active_goals": [
-                {
-                    "goal_id": goal["id"],
-                    "title": goal["title"],
-                    "target": goal["target"],
-                    "summary": goal.get("summary"),
-                }
-                for goal in goals
-            ],
-        }
+        conversation = Conversation()
+        conversation.append_user(question)
+        active_goals = [
+            {
+                "goal_id": goal["id"],
+                "title": goal["title"],
+                "target": goal["target"],
+                "summary": goal.get("summary"),
+            }
+            for goal in goals
+        ]
         try:
             result = self.agent.run_task_json(
                 self.question_link_task,
-                Conversation(),
-                packet=json.dumps(packet),
+                conversation,
+                dynamic_prompts=[f"Active goals:\n{json.dumps(active_goals, ensure_ascii=True)}"],
             )
         except Exception:
             result = {"link": False}
@@ -709,29 +981,8 @@ class LearningSession(TaskConversation):
             confidence = float(item.get("confidence", 0.0))
             if not topic_id or not evidence or confidence < 0.45:
                 continue
-            negative_evidence = (
-                "did not demonstrate",
-                "unclear",
-                "confused",
-                "fuzzy",
-                "outside prior knowledge",
-                "outside what",
-            )
-            if any(phrase in evidence.lower() for phrase in negative_evidence):
-                continue
-            positive_evidence = (
-                "user correctly",
-                "user demonstrated",
-                "user understood",
-                "user recognized",
-                "user paraphrased",
-                "learner correctly",
-                "learner demonstrated",
-                "learner understood",
-                "learner recognized",
-                "learner paraphrased",
-            )
-            if not any(phrase in evidence.lower() for phrase in positive_evidence):
+            gate = self._evaluate_topic_update(item)
+            if not gate.get("accept"):
                 continue
             current = self.profile.topics.get(topic_id)
             values = {}
@@ -760,8 +1011,27 @@ class LearningSession(TaskConversation):
                 )
                 self.sql_db.conn.commit()
                 updated.append(topic_id)
-                notes.append(f"{topic_id}: {evidence}")
+                notes.append(f"{topic_id}: {gate.get('reason') or evidence}")
         return updated, notes
+
+    def _evaluate_topic_update(self, update: dict) -> dict:
+        try:
+            result = self.agent.run_task_json(
+                self.profile_update_gate_task,
+                self.conversation,
+                dynamic_prompts=[
+                    f"Current learner profile:\n{self.profile}",
+                    f"Proposed profile topic update:\n{json.dumps(update, ensure_ascii=True)}",
+                ],
+            )
+        except Exception:
+            return {"accept": False, "reason": "profile update gate was unavailable"}
+        if not isinstance(result, dict):
+            return {"accept": False, "reason": "profile update gate returned an invalid result"}
+        return {
+            "accept": bool(result.get("accept")),
+            "reason": str(result.get("reason") or "").strip(),
+        }
 
     def _save_memories(self, memories: list[dict]) -> int:
         saved = 0

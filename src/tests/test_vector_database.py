@@ -14,6 +14,23 @@ class FakeCollection:
         return {"documents": [["remember this"]], "distances": [[0.1]]}
 
 
+class MultiQueryCollection(FakeCollection):
+    def query(self, **kwargs):
+        self.queries.append(kwargs)
+        return {
+            "documents": [
+                ["missed because first query is distant"],
+                ["remember this", "duplicate"],
+                ["remember this", "better match"],
+            ],
+            "distances": [
+                [1.2],
+                [0.4, 0.7],
+                [0.2, 0.1],
+            ],
+        }
+
+
 class FakeClient:
     def __init__(self):
         self.collections = {}
@@ -50,7 +67,22 @@ def test_query_filters_by_user_id():
     assert collection.queries[0]["where"] == {"user_id": {"$eq": "tester"}}
 
 
+def test_query_pretty_flattens_multiple_query_results():
+    db = make_db()
+    db.client.collections[Collection.INSIGHTS.value] = MultiQueryCollection()
+    text = db.query_pretty(
+        collection_name=Collection.INSIGHTS,
+        query_texts=["indirect wording", "profile topic"],
+        user_id="tester",
+    )
+    assert "better match" in text
+    assert "remember this" in text
+    assert "missed because first query is distant" not in text
+    assert text.index("better match") < text.index("remember this")
+
+
 if __name__ == "__main__":
     test_log_ask_stores_user_metadata()
     test_query_filters_by_user_id()
+    test_query_pretty_flattens_multiple_query_results()
     print("vector database tests passed")

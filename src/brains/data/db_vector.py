@@ -51,10 +51,16 @@ class SemanticDatabase:
             kwargs["user_id"] = user_id
         response = self.query(*args, **kwargs)
         pretty = []
-        results = [(doc, dist) for doc, dist in zip(response["documents"][0], response["distances"][0]) if dist <= max_dist]
+        results = []
+        seen = set()
+        for docs, dists in zip(response["documents"], response["distances"]):
+            for doc, dist in zip(docs, dists):
+                if dist <= max_dist and doc not in seen:
+                    results.append((doc, dist))
+                    seen.add(doc)
         if not len(results):
             return ""
-        for doc, dist in results:
+        for doc, dist in sorted(results, key=lambda item: item[1]):
             pretty.append(f"{doc} (dist: {dist:3f})")
         return "\n".join(pretty)
 

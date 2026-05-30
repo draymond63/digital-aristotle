@@ -302,6 +302,70 @@ class SQLDatabase:
                 return row["id"]
         return topic_id
 
+    def topic_exists(self, topic_id: str) -> bool:
+        topic_id = self.resolve_topic_id(topic_id)
+        if not topic_id:
+            return False
+        self.cursor.execute("SELECT 1 FROM topics WHERE id = ?", (topic_id,))
+        return self.cursor.fetchone() is not None
+
+    def get_topic_summaries(self, limit: int = 50) -> list[dict]:
+        self.cursor.execute(
+            """
+            SELECT id, name, description, aliases_json, confidence
+            FROM topics
+            ORDER BY confidence DESC, id ASC
+            LIMIT ?
+            """,
+            (limit,),
+        )
+        summaries = []
+        for row in self.cursor.fetchall():
+            try:
+                aliases = json.loads(row["aliases_json"] or "[]")
+            except json.JSONDecodeError:
+                aliases = []
+            summaries.append(
+                {
+                    "topic_id": row["id"],
+                    "name": row["name"],
+                    "description": row["description"],
+                    "aliases": aliases if isinstance(aliases, list) else [],
+                    "confidence": row["confidence"],
+                }
+            )
+        return summaries
+
+    def connected_targets(self, start_topics: list[str], target_topics: list[str], max_hops: int = 2) -> list[str]:
+        starts = {self.resolve_topic_id(topic) for topic in start_topics if self.resolve_topic_id(topic)}
+        targets = {self.resolve_topic_id(topic) for topic in target_topics if self.resolve_topic_id(topic)}
+        if not starts or not targets:
+            return []
+        found = set(starts & targets)
+        frontier = set(starts)
+        visited = set(starts)
+        for _ in range(max_hops):
+            if not frontier:
+                break
+            placeholders = ",".join("?" for _ in frontier)
+            self.cursor.execute(
+                f"""
+                SELECT topic1, topic2 FROM topic_edges
+                WHERE topic1 IN ({placeholders})
+                OR topic2 IN ({placeholders})
+                """,
+                [*frontier, *frontier],
+            )
+            neighbors = set()
+            for row in self.cursor.fetchall():
+                neighbors.add(row["topic1"])
+                neighbors.add(row["topic2"])
+            neighbors -= visited
+            found |= neighbors & targets
+            visited |= neighbors
+            frontier = neighbors
+        return [topic for topic in target_topics if self.resolve_topic_id(topic) in found]
+
     def merge_topics(self, source_id: str, target_id: str) -> bool:
         source_raw = str(source_id or "")
         source_resolved = self.resolve_topic_id(source_raw)
@@ -448,6 +512,40 @@ class SQLDatabase:
             """,
             (syllabus_id, goal_id, title),
         )
+        for index, item in enumerate(items, start=1):
+            self.cursor.execute(
+                f"""
+                INSERT INTO syllabus_items
+                    (id, syllabus_id, goal_id, position, title, objective, status, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, 'pending', {self._now_sql()})
+                """,
+                (
+                    self._new_id("item"),
+                    syllabus_id,
+                    goal_id,
+                    index,
+                    item.get("title", f"Milestone {index}"),
+                    item.get("objective", ""),
+                ),
+            )
+        self.conn.commit()
+        return syllabus_id
+
+    def replace_syllabus(self, goal_id: str, title: str, items: list[dict]):
+        self.cursor.execute("SELECT id FROM syllabi WHERE goal_id = ? ORDER BY created_at DESC LIMIT 1", (goal_id,))
+        row = self.cursor.fetchone()
+        if not row:
+            return self.create_syllabus(goal_id, title, items)
+        syllabus_id = row["id"]
+        self.cursor.execute(
+            f"""
+            UPDATE syllabi
+            SET title = ?, updated_at = {self._now_sql()}
+            WHERE id = ?
+            """,
+            (title, syllabus_id),
+        )
+        self.cursor.execute("DELETE FROM syllabus_items WHERE goal_id = ?", (goal_id,))
         for index, item in enumerate(items, start=1):
             self.cursor.execute(
                 f"""

@@ -2,7 +2,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 import os
 
-from brains.comms.agent_base import Agent, Conversation, Task, get_control_model, get_teacher_model
+from brains.comms.agent_base import Agent, Task, get_control_model, get_teacher_model
 
 
 def test_task_ollama_model_routes_to_ollama_client():
@@ -18,7 +18,7 @@ def test_task_ollama_model_routes_to_ollama_client():
     ):
         agent = Agent()
         task = Task("test", "You are concise.", model="qwen2.5:3b-instruct-q4_K_M")
-        assert agent.run_task(task, Conversation()) == "hello"
+        assert agent.run_task(task) == "hello"
 
     request = fake_client.chat.call_args.kwargs
     assert request["model"] == "qwen2.5:3b-instruct-q4_K_M"
@@ -47,7 +47,7 @@ def test_openai_model_routes_to_openai_client():
     ):
         agent = Agent()
         task = Task("test", "You are concise.", model="gpt-test")
-        assert agent.run_task(task, Conversation()) == "hello"
+        assert agent.run_task(task) == "hello"
 
     request = fake_client.chat.completions.create.call_args.kwargs
     assert request["model"] == "gpt-test"
@@ -60,7 +60,7 @@ def test_missing_task_model_fails():
     ):
         agent = Agent()
         try:
-            agent.run_task(Task("test", "You are concise."), Conversation())
+            agent.run_task(Task("test", "You are concise."))
         except ValueError as error:
             assert str(error) == "Task model must be specified"
         else:
@@ -108,8 +108,8 @@ def test_can_mix_task_providers():
         agent = Agent()
         local_task = Task("local", "You are concise.", model="qwen2.5:3b-instruct-q4_K_M")
         api_task = Task("api", "You are concise.", model="gpt-test")
-        assert agent.run_task(local_task, Conversation()) == "local"
-        assert agent.run_task(api_task, Conversation()) == "hello"
+        assert agent.run_task(local_task) == "local"
+        assert agent.run_task(api_task) == "hello"
 
     request = fake_openai_client.chat.completions.create.call_args.kwargs
     assert request["model"] == "gpt-test"

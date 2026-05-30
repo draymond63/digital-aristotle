@@ -35,26 +35,35 @@ class FakeAgent:
         self.never_ready_goal_intake = False
         self.fail_goal_intake = False
         self.goal_intake_packets = []
+        self.profile_gate_accept = True
+        self.profile_gate_packets = []
+        self.question_topic_packets = []
+        self.topic_connection_packets = []
 
     def run_task_json(self, task, conversation, dynamic_prompts=None, packet=None):
-        if task.name == "goal_intake":
+        if task.name == "goal_intake_evaluator":
             if self.fail_goal_intake:
                 raise RuntimeError("model unavailable")
-            self.goal_intake_packets.append(packet or "")
-            user_turns = (packet or "").count("\nUser:")
-            if self.force_ready_on_first_goal_intake and packet and user_turns == 1:
+            transcript = "\n".join(
+                f"{message.role.capitalize()}: {message.content}"
+                for message in conversation.visible_messages()
+            )
+            context = "\n".join(dynamic_prompts or [])
+            intake_context = f"{context}\n{transcript}"
+            self.goal_intake_packets.append(intake_context)
+            user_turns = sum(1 for message in conversation.visible_messages() if message.role == "user")
+            if self.force_ready_on_first_goal_intake and user_turns == 1:
                 return {
                     "status": "ready",
-                    "question": "",
                     "resolved_goal": "statistical modelling and prediction Both",
                     "candidate_theme": "",
                     "adjacent_concepts": [],
-                    "rationale": "Bad model response.",
+                    "response_intent": "propose_goal",
+                        "rationale": "Bad model response.",
                 }
-            if packet and "statistical modelling" in packet and user_turns == 1:
+            if "statistical modelling" in intake_context and user_turns == 1:
                 return {
                     "status": "clarify",
-                    "question": "",
                     "resolved_goal": "",
                     "candidate_theme": "probabilistic modelling for prediction under uncertainty",
                     "adjacent_concepts": [
@@ -63,13 +72,13 @@ class FakeAgent:
                         "model checking",
                         "decision-making under uncertainty",
                     ],
+                    "response_intent": "shape_theme",
                     "rationale": "The user gave a cluster of examples around probabilistic modelling.",
                 }
-            if packet and "robotics better" in packet and user_turns == 1:
+            if "robotics better" in intake_context and user_turns == 1:
                 return {
                     "status": "clarify",
                     "resolved_goal": "",
-                    "question": "",
                     "candidate_theme": "autonomous robotics as perception-action loops",
                     "adjacent_concepts": [
                         "state estimation",
@@ -77,33 +86,42 @@ class FakeAgent:
                         "planning under uncertainty",
                         "feedback stability",
                     ],
+                    "response_intent": "shape_theme",
                     "rationale": "The user gave a robotics topic cluster.",
                 }
             if self.never_ready_goal_intake:
                 return {
                     "status": "clarify",
-                    "question": "Do you want theory, practical application, or both?",
                     "resolved_goal": "",
                     "candidate_theme": "",
                     "adjacent_concepts": [],
+                    "response_intent": "clarify_outcome",
                     "rationale": "Keep clarifying.",
                 }
-            if packet and user_turns >= 2:
-                if "statistical modelling" in packet:
+            if "what other things could it include" in intake_context.lower():
+                return {
+                    "status": "clarify",
+                    "resolved_goal": "",
+                    "candidate_theme": "",
+                    "adjacent_concepts": [],
+                    "response_intent": "answer_scope_question",
+                    "rationale": "The learner is exploring scope before committing.",
+                }
+            if user_turns >= 2:
+                if "statistical modelling" in intake_context:
                     return {
                         "status": "ready",
-                        "question": "",
                         "resolved_goal": (
                             "build practical and theoretical skill in probabilistic modelling for prediction "
                             "and uncertainty"
                         ),
                         "candidate_theme": "",
                         "adjacent_concepts": [],
+                        "response_intent": "propose_goal",
                         "rationale": "The learner accepted the central theme.",
                     }
                 return {
                     "status": "ready",
-                    "question": "",
                     "resolved_goal": (
                         "learn Kalman filters from a controls intuition perspective Both"
                         if self.append_stray_both_to_goal
@@ -111,17 +129,32 @@ class FakeAgent:
                     ),
                     "candidate_theme": "",
                     "adjacent_concepts": [],
+                    "response_intent": "propose_goal",
                     "rationale": "The learner clarified the angle.",
                 }
             return {
                 "status": "clarify",
-                "question": "What angle should this goal take: intuition, math, or implementation?",
                 "resolved_goal": "",
                 "candidate_theme": "",
                 "adjacent_concepts": [],
+                "response_intent": "clarify_outcome",
                 "rationale": "The initial goal is broad.",
             }
         if task.name == "syllabus_planner":
+            planning_context = "\n".join(dynamic_prompts or [])
+            planning_context += "\n" + "\n".join(
+                message.content for message in conversation.visible_messages()
+            )
+            if "Requested syllabus change" in planning_context:
+                return {
+                    "title": "Kalman Filters",
+                    "target_topic": "kalman_filter",
+                    "milestones": [
+                        {"title": "Implementation setup", "objective": "Build a small runnable filter example."},
+                        {"title": "Prediction and correction", "objective": "Understand the filter loop."},
+                        {"title": "Uncertainty", "objective": "Understand covariance and trust."},
+                    ],
+                }
             return {
                 "title": "Kalman Filters",
                 "target_topic": "kalman_filter",
@@ -174,11 +207,104 @@ class FakeAgent:
                     ],
                 },
             }
+        if task.name == "profile_update_gate":
+            self.profile_gate_packets.append("\n".join(dynamic_prompts or []))
+            return {
+                "accept": self.profile_gate_accept,
+                "reason": (
+                    "The learner paraphrased prediction and correction."
+                    if self.profile_gate_accept
+                    else "The transcript does not support the proposed update."
+                ),
+            }
+        if task.name == "question_topic_resolver":
+            context = "\n".join(dynamic_prompts or [])
+            user_text = "\n".join(message.content for message in conversation.visible_messages())
+            self.question_topic_packets.append(f"{context}\n{user_text}")
+            if "widest direction" in user_text.lower():
+                return {
+                    "topics": [
+                        {
+                            "topic_id": "pca_variance_maximization",
+                            "name": "PCA Variance Maximization",
+                            "description": "Why PCA preserves directions with the most variance.",
+                            "confidence": 0.9,
+                        }
+                    ]
+                }
+            if "http etag" in user_text.lower():
+                return {
+                    "topics": [
+                        {
+                            "topic_id": "http_cache_validation",
+                            "name": "HTTP Cache Validation",
+                            "description": "How validators such as ETags avoid unnecessary resource transfer.",
+                            "confidence": 0.9,
+                        }
+                    ]
+                }
+            return {"topics": [{"topic_id": "covariance", "name": "Covariance", "description": "", "confidence": 0.9}]}
+        if task.name == "topic_graph_connection":
+            context = "\n".join(dynamic_prompts or [])
+            user_text = "\n".join(message.content for message in conversation.visible_messages())
+            self.topic_connection_packets.append(f"{context}\n{user_text}")
+            if "pca_variance_maximization" in user_text and "pca_eigenvectors_variance" in context:
+                return {
+                    "connections": [
+                        {
+                            "topic_id": "pca_eigenvectors_variance",
+                            "relation_type": "related",
+                            "confidence": 0.86,
+                            "evidence": "Both topics concern PCA variance directions.",
+                        }
+                    ]
+                }
+            return {"connections": []}
         if task.name == "question_goal_linker":
             return {"link": False, "goal_id": "", "confidence": 0.0, "evidence": "no"}
         raise AssertionError(f"Unexpected JSON task: {task.name}")
 
     def run_task(self, task, conversation, dynamic_prompts=None, packet=None):
+        if task.name == "goal_intake_responder":
+            context = "\n".join(dynamic_prompts or [])
+            context += "\n" + "\n".join(
+                message.content for message in conversation.visible_messages()
+            )
+            if "answer_scope_question" in context:
+                return (
+                    "It could include Bayesian inference, uncertainty calibration, model checking, "
+                    "experimental design, and decision-making under uncertainty. Useful applications include "
+                    "forecasting, sensor fusion, anomaly detection, and choosing actions from noisy data. "
+                    "Which of those applications should shape the track?"
+                )
+            if "propose_goal" in context:
+                marker = "'resolved_goal': '"
+                resolved_goal = "learn Kalman filters from a controls intuition perspective"
+                if marker in context:
+                    resolved_goal = context.split(marker, 1)[1].split("'", 1)[0]
+                return (
+                    f"Here is the goal I would create:\n{resolved_goal}\n\n"
+                    "Say 'create it' when this feels right. You can also ask what else it could include, "
+                    "what these ideas are useful for, or tell me what to change."
+                )
+            if "probabilistic modelling for prediction under uncertainty" in context:
+                return (
+                    "It sounds like the center might be probabilistic modelling for prediction under uncertainty. "
+                    "That could include Bayesian inference, uncertainty calibration, model checking, and "
+                    "decision-making under uncertainty. Is that the right center, or would you frame it differently?"
+                )
+            if "autonomous robotics as perception-action loops" in context:
+                return (
+                    "It sounds like the center might be autonomous robotics as perception-action loops. "
+                    "That could include state estimation, world models, planning under uncertainty, and feedback stability. "
+                    "Is that the right center, or would you frame it differently?"
+                )
+            if "statistical modelling" in context and "clarify_outcome" in context:
+                return (
+                    "I hear a cluster of examples around statistical modelling, but not quite the center yet. "
+                    "Are you aiming for prediction under uncertainty, simulation, model selection, or something else?"
+                )
+            return "What angle should this goal take: intuition, math, or implementation?"
         if task.name == "teacher":
             return "A Kalman filter alternates prediction and correction."
         raise AssertionError(f"Unexpected text task: {task.name}")
@@ -208,8 +334,10 @@ def create_kalman_goal(session: LearningSession):
     first = session.handle("/goal learn Kalman filters")
     assert "What angle" in first.text
     proposed = session.handle("controls intuition")
-    assert "Reply yes to create it" in proposed.text
-    return session.handle("yes")
+    assert "Say 'create it'" in proposed.text
+    review = session.handle("yes")
+    assert "Take a look at the syllabus" in review.text
+    return session.handle("looks good")
 
 
 def test_schema_is_idempotent():
@@ -245,8 +373,8 @@ def test_goal_lifecycle_and_finalization():
         try:
             session = make_session(Path(dirname))
             created = create_kalman_goal(session)
-            assert "Created learning goal: Kalman Filters" in created.text
-            assert "Syllabus:" in created.text
+            assert "Great. Syllabus saved." in created.text
+            assert "Starting with the first milestone" in created.text
             assert session.active_goal_id is not None
 
             goals = session.handle("/goals").text
@@ -281,10 +409,15 @@ def test_goal_creation_clarifies_before_creating_syllabus():
             assert session.mode == "goal_confirm"
             assert session.sql_db.get_active_goals("tester") == []
 
-            created = session.handle("yes")
-            assert "Created learning goal: Kalman Filters" in created.text
-            assert session.mode == "goal"
+            review = session.handle("yes")
+            assert "Created learning goal: Kalman Filters" in review.text
+            assert "Take a look at the syllabus" in review.text
+            assert session.mode == "syllabus_review"
             assert len(session.sql_db.get_active_goals("tester")) == 1
+
+            created = session.handle("looks good")
+            assert "Starting with the first milestone" in created.text
+            assert session.mode == "goal"
             session.sql_db.close()
         finally:
             os.chdir(old_cwd)
@@ -410,7 +543,7 @@ def test_goal_confirmation_can_be_revised_before_creation():
             session = make_session(Path(dirname))
             session.handle("/goal learn Kalman filters")
             proposal = session.handle("controls intuition")
-            assert "Reply yes" in proposal.text
+            assert "Say 'create it'" in proposal.text
             assert session.mode == "goal_confirm"
 
             revised = session.handle("make it implementation focused instead")
@@ -420,7 +553,62 @@ def test_goal_confirmation_can_be_revised_before_creation():
 
             created = session.handle("yes")
             assert "Created learning goal" in created.text
+            assert session.mode == "syllabus_review"
             assert len(session.sql_db.get_active_goals("tester")) == 1
+            session.sql_db.close()
+        finally:
+            os.chdir(old_cwd)
+
+
+def test_goal_intake_allows_open_ended_scope_questions_before_confirmation():
+    with TemporaryDirectory() as dirname:
+        old_cwd = Path.cwd()
+        try:
+            session = make_session(Path(dirname))
+            session.handle(
+                "/goal I want to get better at statistical modelling and prediction. "
+                "Things like gaussian processes, monte carlo simulations, feature weighting based on covariance, etc"
+            )
+            proposal = session.handle("Both")
+            assert "Here is the goal I would create" in proposal.text
+            assert session.mode == "goal_confirm"
+
+            scope = session.handle("What other things could it include? What could I use these techniques for?")
+            assert "sensor fusion" in scope.text
+            assert "Which of those applications should shape the track?" in scope.text
+            assert session.mode == "goal_intake"
+            assert session.sql_db.get_active_goals("tester") == []
+
+            created = session.handle("create it")
+            assert "Created learning goal" in created.text
+            assert session.mode == "syllabus_review"
+            assert len(session.sql_db.get_active_goals("tester")) == 1
+            session.sql_db.close()
+        finally:
+            os.chdir(old_cwd)
+
+
+def test_syllabus_review_allows_refinement_before_first_lesson():
+    with TemporaryDirectory() as dirname:
+        old_cwd = Path.cwd()
+        try:
+            session = make_session(Path(dirname))
+            session.handle("/goal learn Kalman filters")
+            session.handle("controls intuition")
+            review = session.handle("yes")
+            assert "Take a look at the syllabus" in review.text
+            assert session.mode == "syllabus_review"
+            assert session.active_session_id is None
+
+            revised = session.handle("Add an implementation-focused milestone first.")
+            assert "Implementation setup" in revised.text
+            assert session.mode == "syllabus_review"
+            assert session.active_session_id is None
+
+            started = session.handle("looks good")
+            assert "Starting with the first milestone" in started.text
+            assert session.mode == "goal"
+            assert session.active_session_id is not None
             session.sql_db.close()
         finally:
             os.chdir(old_cwd)
@@ -456,6 +644,82 @@ def test_one_off_question_does_not_create_goal():
             os.chdir(old_cwd)
 
 
+def test_one_off_question_context_steers_away_from_generic_overview():
+    with TemporaryDirectory() as dirname:
+        old_cwd = Path.cwd()
+        try:
+            session = make_session(Path(dirname))
+            context = session._build_question_context(
+                "I have a mental model but I am fuzzy on the distinction."
+            )
+            assert "Use the learner's own wording as the starting point" in context
+            assert "sharpen that model" in context
+            assert "use them to continue the prior line of reasoning" in context
+            assert "Avoid broad comparison lists" in context
+            session.sql_db.close()
+        finally:
+            os.chdir(old_cwd)
+
+
+def test_one_off_question_memory_query_uses_graph_connected_profile_topics():
+    with TemporaryDirectory() as dirname:
+        old_cwd = Path.cwd()
+        try:
+            session = make_session(Path(dirname))
+            session.profile.update_topic("pca_eigenvectors_variance", intuition=0.25, details=0.25, confidence=0.25)
+            session.sql_db.upsert_topic(
+                "pca_eigenvectors_variance",
+                name="PCA Eigenvectors and Variance",
+                description="How PCA eigenvectors relate to maximal variance directions.",
+            )
+            session.handle("/ask Why does the widest direction preserve information?")
+            insight_query = next(
+                kwargs["query_texts"]
+                for _, kwargs in session.vector_db.queries
+                if kwargs["collection_name"] == "insights"
+            )
+            assert "Why does the widest direction preserve information?" in insight_query
+            assert "pca eigenvectors variance" in insight_query
+            assert any("Related learner topic: pca eigenvectors variance" in item for item in insight_query)
+            assert session.agent.question_topic_packets
+            assert session.agent.topic_connection_packets
+            assert session.sql_db.connected_targets(
+                ["pca_variance_maximization"],
+                ["pca_eigenvectors_variance"],
+                max_hops=2,
+            ) == ["pca_eigenvectors_variance"]
+            assert session.sql_db.topic_exists("pca_variance_maximization")
+            session.sql_db.close()
+        finally:
+            os.chdir(old_cwd)
+
+
+def test_unrelated_one_off_question_does_not_use_profile_topic_memory_hint():
+    with TemporaryDirectory() as dirname:
+        old_cwd = Path.cwd()
+        try:
+            session = make_session(Path(dirname))
+            session.profile.update_topic("pca_eigenvectors_variance", intuition=0.25, details=0.25, confidence=0.25)
+            session.sql_db.upsert_topic(
+                "pca_eigenvectors_variance",
+                name="PCA Eigenvectors and Variance",
+                description="How PCA eigenvectors relate to maximal variance directions.",
+            )
+            session.handle("/ask Why does an HTTP ETag help with cache validation?")
+            insight_query = next(
+                kwargs["query_texts"]
+                for _, kwargs in session.vector_db.queries
+                if kwargs["collection_name"] == "insights"
+            )
+            assert insight_query == ["Why does an HTTP ETag help with cache validation?"]
+            assert session.agent.question_topic_packets
+            assert session.agent.topic_connection_packets
+            assert session.sql_db.topic_exists("http_cache_validation")
+            session.sql_db.close()
+        finally:
+            os.chdir(old_cwd)
+
+
 def test_one_off_question_followups_share_open_session_until_switch():
     with TemporaryDirectory() as dirname:
         old_cwd = Path.cwd()
@@ -480,6 +744,49 @@ def test_one_off_question_followups_share_open_session_until_switch():
             )
             assert session.sql_db.cursor.fetchone()["status"] == "answered"
             assert session.mode == "goal"
+            session.sql_db.close()
+        finally:
+            os.chdir(old_cwd)
+
+
+def test_profile_update_gate_uses_model_evaluation_not_evidence_phrase_matching():
+    with TemporaryDirectory() as dirname:
+        old_cwd = Path.cwd()
+        try:
+            session = make_session(Path(dirname))
+            session.conversation.append_user("Prediction then correction is the basic loop.")
+            updated, notes = session._apply_topic_updates(
+                [
+                    {
+                        "topic_id": "kalman_filter",
+                        "intuition": 0.4,
+                        "details": 0.1,
+                        "confidence": 0.5,
+                        "evidence": "User understands the basic loop.",
+                    }
+                ]
+            )
+            assert updated == ["kalman_filter"]
+            assert "kalman_filter" in session.profile.topics
+            assert session.agent.profile_gate_packets
+            assert "User understands the basic loop." in session.agent.profile_gate_packets[-1]
+            assert "The learner paraphrased prediction and correction." in notes[0]
+
+            session.agent.profile_gate_accept = False
+            updated, notes = session._apply_topic_updates(
+                [
+                    {
+                        "topic_id": "unsupported_topic",
+                        "intuition": 0.4,
+                        "details": 0.1,
+                        "confidence": 0.5,
+                        "evidence": "User understood unsupported topic.",
+                    }
+                ]
+            )
+            assert updated == []
+            assert notes == []
+            assert "unsupported_topic" not in session.profile.topics
             session.sql_db.close()
         finally:
             os.chdir(old_cwd)
@@ -518,7 +825,7 @@ def test_duplicate_goal_resumes_existing_goal():
             session.handle("/goal learn Kalman filters")
             session.handle("controls intuition")
             second = session.handle("yes").text
-            assert "Created learning goal" in first
+            assert "Starting with the first milestone" in first
             assert "already have this active goal" in second
             assert len(session.sql_db.get_active_goals("tester")) == 1
             session.sql_db.close()
@@ -646,8 +953,14 @@ if __name__ == "__main__":
     test_goal_intake_generic_fallback_when_model_is_unavailable()
     test_goal_intake_carries_confirmed_adjacent_concepts_into_goal()
     test_goal_confirmation_can_be_revised_before_creation()
+    test_goal_intake_allows_open_ended_scope_questions_before_confirmation()
+    test_syllabus_review_allows_refinement_before_first_lesson()
     test_one_off_question_does_not_create_goal()
+    test_one_off_question_context_steers_away_from_generic_overview()
+    test_one_off_question_memory_query_uses_graph_connected_profile_topics()
+    test_unrelated_one_off_question_does_not_use_profile_topic_memory_hint()
     test_one_off_question_followups_share_open_session_until_switch()
+    test_profile_update_gate_uses_model_evaluation_not_evidence_phrase_matching()
     test_continue_resumes_recent_goal()
     test_duplicate_goal_resumes_existing_goal()
     test_stale_question_sessions_are_abandoned_on_startup()

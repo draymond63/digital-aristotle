@@ -175,7 +175,6 @@ class OnboardingBrain(TaskConversation):
         self.field_start_index = len(self.convo)
         yield from self.stream_task(
             self.transition_task,
-            Conversation(),
             dynamic_prompts=[ASSESSMENT_TRANSITION_PROMPT(topic, meaning)],
             packet=packet,
         )
@@ -274,4 +273,3 @@ class OnboardingBrain(TaskConversation):
             for message in previous_section
         )
         return SECTION_TRANSITION_PROMPT(dimension, meaning, transcript)
-

@@ -167,7 +167,7 @@ class Agent:
     def run_task(
         self,
         task: Task,
-        conversation: Conversation,
+        conversation: Conversation | None = None,
         dynamic_prompts: list[str] | None = None,
         packet: str | None = None,
     ) -> str:
@@ -177,7 +177,7 @@ class Agent:
     def run_task_json(
         self,
         task: Task,
-        conversation: Conversation,
+        conversation: Conversation | None = None,
         dynamic_prompts: list[str] | None = None,
         packet: str | None = None,
     ) -> dict | list:
@@ -190,7 +190,7 @@ class Agent:
     def stream_task(
         self,
         task: Task,
-        conversation: Conversation,
+        conversation: Conversation | None = None,
         dynamic_prompts: list[str] | None = None,
         packet: str | None = None,
     ):
@@ -201,10 +201,11 @@ class Agent:
     def build_task_messages(
         self,
         task: Task,
-        conversation: Conversation,
+        conversation: Conversation | None = None,
         dynamic_prompts: list[str] | None = None,
         packet: str | None = None,
     ) -> list[dict[str, str]]:
+        conversation = conversation or Conversation()
         dynamic_prompts = dynamic_prompts or []
         messages = [{"role": "system", "content": task.static_prompt}]
         context = self._format_task_context(task, conversation, packet)
@@ -217,7 +218,8 @@ class Agent:
 
         return messages
 
-    def _generate_task(self, task: Task, conversation: Conversation, dynamic_prompts=None, packet=None, **kwargs):
+    def _generate_task(self, task: Task, conversation: Conversation | None = None, dynamic_prompts=None, packet=None, **kwargs):
+        conversation = conversation or Conversation()
         messages = self.build_task_messages(task, conversation, dynamic_prompts, packet)
         return self._generate(
             messages,
