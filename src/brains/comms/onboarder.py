@@ -40,7 +40,7 @@ class OnboardingBrain(TaskConversation):
         ),
     }
     unsure_prompt = (
-        "Totally fine. We can finish setup without picking a topic, and you can ask or start a goal later."
+            "Totally fine. We can finish setup without picking a topic, and you can ask a question later."
     )
     questions_per_dimension = 1
 
@@ -112,7 +112,7 @@ class OnboardingBrain(TaskConversation):
 
     def respond(self, user_message: str):
         if self.profile_seed is not None:
-            yield "You are set up. Ask me anything, or turn something into a longer goal when it feels worth tracking."
+            yield "You are set up. Ask me anything when you are ready."
             return
 
         self.add_usr_msg(user_message)

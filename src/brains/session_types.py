@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 
-SessionMode = Literal["idle", "goal_intake", "goal_confirm", "syllabus_review", "goal", "question"]
+SessionMode = Literal["idle", "question"]
 
 
 @dataclass
@@ -20,7 +20,6 @@ class FinalizationReport:
     conversation_path: str
     profile_backup_path: str
     audit_id: str
-    milestone_status: str = "continue"
     memories_saved: int = 0
     topics_updated: list[str] = field(default_factory=list)
     topic_update_notes: list[str] = field(default_factory=list)
@@ -39,10 +38,6 @@ class FinalizationReport:
         ]
         if self.topics_updated:
             lines.append(f"Profile topics updated: {', '.join(self.topics_updated)}")
-        if self.milestone_status == "continue":
-            lines.append("Milestone status: continuing this milestone next time")
-        elif self.milestone_status == "done":
-            lines.append("Milestone status: ready for the next milestone")
         if self.topic_update_notes:
             lines.append("Why those profile updates:")
             lines.extend(f"- {note}" for note in self.topic_update_notes)
@@ -54,15 +49,11 @@ class FinalizationReport:
 
 
 HELP_TEXT = """Commands:
-/goal <topic or outcome>  Start a resumable learning goal.
-/learn <topic or outcome> Same as /goal.
-/continue                Resume your most recent active goal.
-/goals                   Show active goals.
-/ask <question>          Ask a one-off question without creating a goal.
+/ask <question>          Ask a learning question.
 /done                    Finish this session and persist learning updates.
 /save                    Save the current conversation without finalizing.
 /profile                 Show your compact learner profile.
-/topic                   Show the current topic or goal context.
+/topic                   Show the current topic context.
 /new                     Save this conversation and start fresh.
 /help                    Show this help.
 /quit                    Save and exit.

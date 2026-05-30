@@ -1,103 +1,4 @@
-GOAL_INTAKE_EVALUATOR_PROMPT = """You evaluate a learner's intended long-term learning goal before a syllabus is created.
-
-Input:
-- the learner profile
-- the goal-intake conversation so far
-
-Return strict JSON only:
-
-{
-  "status": "clarify | ready",
-  "resolved_goal": "specific syllabus-ready learning goal, or empty string when clarifying",
-  "candidate_theme": "likely central topic or capability, or empty string",
-  "adjacent_concepts": ["nearby concept that may belong in the track"],
-  "response_intent": "shape_theme | answer_scope_question | clarify_outcome | propose_goal",
-  "rationale": "brief reason"
-}
-
-Rules:
-- Clarification is the default for vague, broad, or ambiguous requests.
-- Decide state only. Do not write user-facing prose.
-- Identify whether the learner is asking about scope, applications, adjacent concepts, or wording.
-- The learner may ask exploratory meta-questions before committing, such as what else the goal could include or what the techniques are useful for.
-- When they ask those questions, set response_intent to "answer_scope_question" and keep status "clarify".
-- Do not rush to ready just because the learner answered one clarifying question.
-- Use status "ready" only when the learner appears confident enough to confirm a durable goal.
-- If the learner gives a cluster of examples without naming the central theme, infer the deeper family of ideas rather than merely restating their examples.
-- In that case, set candidate_theme to a useful umbrella concept or capability the learner may not know how to name yet.
-- candidate_theme should usually be one abstraction level deeper or more synthetic than the user's wording.
-- Avoid using the user's broad phrase verbatim as candidate_theme when a more illuminating frame is available.
-- Set adjacent_concepts to 2-4 nearby ideas that broaden the frame beyond the user's examples.
-- Adjacent concepts should be plausible, illuminating extensions, not generic prerequisites.
-- Good adjacent concepts often include hidden structure, evaluation criteria, failure modes, design tradeoffs, or neighboring methods.
-- Do not create a syllabus.
-- Do not teach the topic yet.
-- If the learner has already answered a clarifying question, you may still keep clarifying if they are exploring the shape or usefulness of the goal.
-- Do not echo the user's wording with unexplained option labels like "both", "all", "neither", or "mixed" appended.
-- Do not concatenate multiple user turns into resolved_goal.
-- If the learner accepts adjacent ideas, include those adjacent concepts in resolved_goal.
-- The resolved_goal must be a clean sentence fragment, not a transcript.
-- Keep resolved_goal under 25 words.
-"""
-
-
-GOAL_INTAKE_RESPONDER_PROMPT = """You help a learner shape a long-term learning goal before a syllabus is created.
-
-Input:
-- the learner profile
-- the goal-intake conversation so far
-- a hidden evaluator decision with candidate theme, adjacent concepts, status, and resolved goal
-
-Write the next user-facing message only.
-
-Rules:
-- Sound like a thoughtful collaborator, not a form.
-- Be concrete and imaginative without becoming long.
-- If the evaluator suggests a candidate theme, name it and explain why it may be the center.
-- If adjacent concepts are provided, use them as possibilities, not a checklist.
-- If the learner asks what else the goal could include or what it could be used for, answer that directly with useful examples and one next choice.
-- If status is "ready", present the proposed goal clearly and invite the learner to say "create it" when it feels right or keep refining it.
-- Do not create a syllabus.
-- Ask at most one question.
-- Avoid canned phrases like "Here is the goal I would create" unless it genuinely fits the moment.
-- Keep the message compact: usually 2 short paragraphs or fewer.
-"""
-
-
-SYLLABUS_PROMPT = """You design compact, practical syllabi for an adaptive personal tutor.
-
-Input:
-- the learner profile and related topic context as system context
-- the user's requested long-term goal, or a requested syllabus revision, as conversation context
-
-Return strict JSON only:
-
-{
-  "title": "short readable title",
-  "target_topic": "canonical topic id",
-  "milestones": [
-    {
-      "title": "short milestone title",
-      "objective": "what the learner should be able to understand or do"
-    }
-  ]
-}
-
-Rules:
-- Return 3 to 6 milestones.
-- Start from the highest reasonable entry point for this learner.
-- Do not begin with generic prerequisites unless the requested goal truly requires them.
-- For geometry-flavored goals, prefer the first domain-specific geometric concept over elementary vector basics.
-- If a prerequisite is useful, fold it into the first domain-specific milestone instead of making it a standalone beginner unit.
-- If the user says "from scratch" or asks for something far beyond the profile, create a gentle bridge milestone first.
-- For advanced math goals, the first milestone should build the nearest intuitive foothold, not start at the formal machinery.
-- Do not include busywork, homework language, or school-like phrasing.
-- Keep milestones concrete and resumable.
-- Use snake_case for target_topic.
-"""
-
-
-SESSION_FINALIZATION_PROMPT = """You finalize an adaptive learning session.
+SESSION_FINALIZATION_PROMPT = """You finalize an adaptive learning conversation.
 
 Analyze the transcript and return durable updates only. Do not continue the lesson.
 
@@ -106,7 +7,6 @@ Return strict JSON only:
 {
   "summary": "one concise human-readable summary of what happened",
   "next_step": "the best next learning step",
-  "milestone_status": "done | continue",
   "topic_updates": [
     {
       "topic_id": "canonical_topic_id",
@@ -149,9 +49,7 @@ Return strict JSON only:
 Rules:
 - Be conservative with topic_updates.
 - Do not claim mastery from a single correct phrase.
-- Use topic ids that match the actual lesson target or demonstrated concept, not overly broad prerequisite names unless the user directly worked on them.
-- Set milestone_status to "done" only when the learner demonstrated enough understanding to move to the next syllabus item.
-- Set milestone_status to "continue" when the session mostly exposed missing prerequisites, confusion, or orientation work.
+- Use topic ids that match the actual question or demonstrated concept, not overly broad prerequisite names unless the user directly worked on them.
 - Include evidence for every durable update.
 - Prefer fewer high-quality memories over many weak ones.
 - If nothing durable happened, return empty lists.
@@ -237,26 +135,4 @@ Rules:
 - Return no connection for unrelated topics, even if both are technical.
 - Prefer fewer high-confidence connections over broad weak links.
 - Confidence must reflect conceptual relatedness, not user interest.
-"""
-
-
-QUESTION_GOAL_LINK_PROMPT = """You decide whether a one-off question should be quietly linked to an existing long-term learning goal.
-
-Input:
-- active goals as system context
-- the one-off question as the user message
-
-Return strict JSON only:
-
-{
-  "link": true,
-  "goal_id": "goal id or empty string",
-  "confidence": 0.0,
-  "evidence": "brief reason"
-}
-
-Rules:
-- Link only when the question clearly supports an active goal.
-- Do not create new goals.
-- Prefer false when uncertain.
 """

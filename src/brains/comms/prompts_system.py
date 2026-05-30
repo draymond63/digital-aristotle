@@ -2,7 +2,7 @@ TOPIC_ID_PROMPT = """
 You are a topic extraction system.
 
 Extract the main technical topics from the user input for use in:
-- curriculum tracking
+- conversation-aware tutoring
 - memory retrieval
 - routing decisions
 

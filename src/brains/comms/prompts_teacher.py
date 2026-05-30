@@ -137,7 +137,7 @@ These directives specify:
 - the current teaching mode
 - evaluation requirements
 - remediation targets
-- curriculum transitions
+- conversation context and memory retrieval
 
 You should follow them while maintaining natural conversational flow.
 

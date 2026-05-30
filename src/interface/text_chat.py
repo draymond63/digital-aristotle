@@ -28,28 +28,18 @@ from brains.session import LearningSession
 MAX_TELEGRAM_MESSAGE_CHARS = 3900
 ATTEMPT_LOG_PATH = Path("data/telegram_attempted_usage.jsonl")
 
-BUTTON_CONTINUE = "Continue Goal"
-BUTTON_START_GOAL = "Start Goal"
 BUTTON_ASK = "Ask Question"
-BUTTON_MAKE_GOAL = "Make This A Goal"
-BUTTON_GOALS = "My Goals"
 BUTTON_DONE = "Done"
 BUTTON_PROFILE = "Profile"
 BUTTON_HELP = "Help"
 
 BUTTON_TO_COMMAND = {
-    BUTTON_CONTINUE: "/continue",
-    BUTTON_GOALS: "/goals",
     BUTTON_DONE: "/done",
     BUTTON_PROFILE: "/profile",
     BUTTON_HELP: "/help",
 }
 
 COMMANDS = (
-    "goal",
-    "learn",
-    "continue",
-    "goals",
     "ask",
     "done",
     "save",
@@ -99,7 +89,7 @@ def telegram_user_id(user_id: int) -> str:
 
 def keyboard_markup(button_rows: list[list[str]] | None = None) -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
-        button_rows or [[BUTTON_START_GOAL, BUTTON_ASK], [BUTTON_PROFILE, BUTTON_HELP]],
+        button_rows or [[BUTTON_ASK], [BUTTON_PROFILE, BUTTON_HELP]],
         resize_keyboard=True,
         is_persistent=True,
     )
@@ -243,18 +233,16 @@ class TelegramTutorBot:
                 self.last_one_off_questions[telegram_id] = first_question
                 first_answer = session.handle(f"/ask {first_question}").text
                 return TelegramReply(
-                    f"{response}\n\nLet's start with that as a quick question. "
-                    f"You can use \"{BUTTON_MAKE_GOAL}\" if you want to turn it into a longer track.\n\n"
+                    f"{response}\n\nLet's start with that as a quick question.\n\n"
                     f"{first_answer}",
                     include_keyboard=True,
                     button_rows=self._button_rows(telegram_id),
                 )
             return TelegramReply(
                 f"{response}\n\n"
-                "No topic picked, so I will not start a question or create a goal yet.\n\n"
+                "No topic picked, so I will not start a question yet.\n\n"
                 "Next things you can do:\n"
                 "- Ask Question or /ask <question> for a quick one-off.\n"
-                "- Start Goal or /goal <topic> for a resumable learning track.\n"
                 "- Profile to see what I saved.\n"
                 "- Help for the full command list.",
                 include_keyboard=True,
@@ -271,18 +259,9 @@ class TelegramTutorBot:
         session = self._get_session(telegram_id)
         if not text:
             return ""
-        if text == BUTTON_START_GOAL:
-            self.pending_actions[telegram_id] = "goal"
-            return "What do you want to learn?"
         if text == BUTTON_ASK:
             self.pending_actions[telegram_id] = "ask"
             return "What's your question?"
-        if text == BUTTON_MAKE_GOAL:
-            target = self.last_one_off_questions.get(telegram_id)
-            if not target:
-                self.pending_actions[telegram_id] = "goal"
-                return "What should the goal be?"
-            return session.handle(f"/goal {target}").text
         if text in BUTTON_TO_COMMAND:
             self.pending_actions.pop(telegram_id, None)
             return session.handle(BUTTON_TO_COMMAND[text]).text
@@ -292,30 +271,15 @@ class TelegramTutorBot:
             return session.handle(text).text
 
         pending = self.pending_actions.pop(telegram_id, None)
-        if pending == "goal":
-            return session.handle(f"/goal {text}").text
         if pending == "ask":
             self.last_one_off_questions[telegram_id] = text
             return session.handle(f"/ask {text}").text
-        if session.mode != "goal":
-            self.last_one_off_questions[telegram_id] = text
+        self.last_one_off_questions[telegram_id] = text
         return session.handle(text).text
 
     def _button_rows(self, telegram_id: int) -> list[list[str]]:
         rows = []
-        first_row = []
-        if self._has_active_goal(telegram_id):
-            first_row.append(BUTTON_CONTINUE)
-        first_row.append(BUTTON_START_GOAL)
-        rows.append(first_row)
-
-        ask_row = [BUTTON_ASK]
-        if self.last_one_off_questions.get(telegram_id):
-            ask_row.append(BUTTON_MAKE_GOAL)
-        rows.append(ask_row)
-
-        if self._has_active_goal(telegram_id):
-            rows.append([BUTTON_GOALS])
+        rows.append([BUTTON_ASK])
 
         final_row = []
         if self._has_active_session(telegram_id):
@@ -323,14 +287,6 @@ class TelegramTutorBot:
         final_row.extend([BUTTON_PROFILE, BUTTON_HELP])
         rows.append(final_row)
         return rows
-
-    def _has_active_goal(self, telegram_id: int) -> bool:
-        session = self.sessions.get(telegram_id)
-        if not session:
-            return False
-        if hasattr(session, "has_active_goal"):
-            return bool(session.has_active_goal())
-        return bool(session.sql_db.get_recent_active_goal(session.user_id))
 
     def _has_active_session(self, telegram_id: int) -> bool:
         session = self.sessions.get(telegram_id)

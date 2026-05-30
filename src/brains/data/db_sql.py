@@ -122,46 +122,9 @@ class SQLDatabase:
         SQLDatabase._add_column_if_missing(conn, "mastery_history", "evidence", "TEXT")
 
         c.execute("""
-        CREATE TABLE IF NOT EXISTS learning_goals (
+        CREATE TABLE IF NOT EXISTS learning_sessions (
             id TEXT PRIMARY KEY,
             user_id TEXT NOT NULL,
-            title TEXT NOT NULL,
-            target TEXT NOT NULL,
-            target_topic_id TEXT,
-            status TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            summary TEXT,
-            next_step TEXT
-        )
-        """)
-        c.execute("""
-        CREATE TABLE IF NOT EXISTS syllabi (
-            id TEXT PRIMARY KEY,
-            goal_id TEXT NOT NULL,
-            title TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-        )
-        """)
-        c.execute("""
-        CREATE TABLE IF NOT EXISTS syllabus_items (
-            id TEXT PRIMARY KEY,
-            syllabus_id TEXT NOT NULL,
-            goal_id TEXT NOT NULL,
-            position INTEGER NOT NULL,
-            title TEXT NOT NULL,
-            objective TEXT,
-            status TEXT NOT NULL DEFAULT 'pending',
-            summary TEXT,
-            updated_at TEXT NOT NULL
-        )
-        """)
-        c.execute("""
-        CREATE TABLE IF NOT EXISTS goal_sessions (
-            id TEXT PRIMARY KEY,
-            user_id TEXT NOT NULL,
-            goal_id TEXT,
             session_type TEXT NOT NULL,
             status TEXT NOT NULL,
             started_at TEXT NOT NULL,
@@ -173,35 +136,10 @@ class SQLDatabase:
         )
         """)
         c.execute("""
-        CREATE TABLE IF NOT EXISTS goal_progress_events (
-            id TEXT PRIMARY KEY,
-            user_id TEXT NOT NULL,
-            goal_id TEXT,
-            session_id TEXT,
-            event_type TEXT NOT NULL,
-            content TEXT,
-            evidence TEXT,
-            created_at TEXT NOT NULL,
-            metadata_json TEXT
-        )
-        """)
-        c.execute("""
-        CREATE TABLE IF NOT EXISTS question_goal_links (
-            id TEXT PRIMARY KEY,
-            user_id TEXT NOT NULL,
-            question_session_id TEXT NOT NULL,
-            goal_id TEXT NOT NULL,
-            confidence REAL NOT NULL,
-            evidence TEXT,
-            created_at TEXT NOT NULL
-        )
-        """)
-        c.execute("""
         CREATE TABLE IF NOT EXISTS update_audit_log (
             id TEXT PRIMARY KEY,
             user_id TEXT NOT NULL,
             session_id TEXT,
-            goal_id TEXT,
             profile_backup_path TEXT,
             conversation_path TEXT,
             summary TEXT,
@@ -403,7 +341,6 @@ class SQLDatabase:
         self.cursor.execute("UPDATE OR IGNORE mastery_history SET topic_id = ? WHERE topic_id = ?", (target_id, source_id))
         self.cursor.execute("DELETE FROM topic_context WHERE topic_id = ?", (source_id,))
         self.cursor.execute("DELETE FROM mastery_history WHERE topic_id = ?", (source_id,))
-        self.cursor.execute("UPDATE learning_goals SET target_topic_id = ? WHERE target_topic_id = ?", (target_id, source_id))
         self.cursor.execute("DELETE FROM topic_edges WHERE topic1 = ? OR topic2 = ?", (source_id, source_id))
         self.cursor.execute("DELETE FROM topics WHERE id = ?", (source_id,))
         self.conn.commit()
@@ -478,112 +415,10 @@ class SQLDatabase:
         self.conn.commit()
         return True
 
-    def create_learning_goal(
-        self,
-        user_id: str,
-        title: str,
-        target: str,
-        target_topic_id: str | None = None,
-        target_topic_name: str | None = None,
-    ):
-        goal_id = self._new_id("goal")
-        target_topic_id = self.upsert_topic(
-            target_topic_id or target,
-            name=target_topic_name or title,
-            aliases=[target, title],
-        )
-        self.cursor.execute(
-            f"""
-            INSERT INTO learning_goals
-                (id, user_id, title, target, target_topic_id, status, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, 'active', {self._now_sql()}, {self._now_sql()})
-            """,
-            (goal_id, user_id, title, target, target_topic_id),
-        )
-        self.conn.commit()
-        return goal_id
-
-    def create_syllabus(self, goal_id: str, title: str, items: list[dict]):
-        syllabus_id = self._new_id("syl")
-        self.cursor.execute(
-            f"""
-            INSERT INTO syllabi (id, goal_id, title, created_at, updated_at)
-            VALUES (?, ?, ?, {self._now_sql()}, {self._now_sql()})
-            """,
-            (syllabus_id, goal_id, title),
-        )
-        for index, item in enumerate(items, start=1):
-            self.cursor.execute(
-                f"""
-                INSERT INTO syllabus_items
-                    (id, syllabus_id, goal_id, position, title, objective, status, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, 'pending', {self._now_sql()})
-                """,
-                (
-                    self._new_id("item"),
-                    syllabus_id,
-                    goal_id,
-                    index,
-                    item.get("title", f"Milestone {index}"),
-                    item.get("objective", ""),
-                ),
-            )
-        self.conn.commit()
-        return syllabus_id
-
-    def replace_syllabus(self, goal_id: str, title: str, items: list[dict]):
-        self.cursor.execute("SELECT id FROM syllabi WHERE goal_id = ? ORDER BY created_at DESC LIMIT 1", (goal_id,))
-        row = self.cursor.fetchone()
-        if not row:
-            return self.create_syllabus(goal_id, title, items)
-        syllabus_id = row["id"]
-        self.cursor.execute(
-            f"""
-            UPDATE syllabi
-            SET title = ?, updated_at = {self._now_sql()}
-            WHERE id = ?
-            """,
-            (title, syllabus_id),
-        )
-        self.cursor.execute("DELETE FROM syllabus_items WHERE goal_id = ?", (goal_id,))
-        for index, item in enumerate(items, start=1):
-            self.cursor.execute(
-                f"""
-                INSERT INTO syllabus_items
-                    (id, syllabus_id, goal_id, position, title, objective, status, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, 'pending', {self._now_sql()})
-                """,
-                (
-                    self._new_id("item"),
-                    syllabus_id,
-                    goal_id,
-                    index,
-                    item.get("title", f"Milestone {index}"),
-                    item.get("objective", ""),
-                ),
-            )
-        self.conn.commit()
-        return syllabus_id
-
-    def get_goal(self, goal_id: str):
-        self.cursor.execute("SELECT * FROM learning_goals WHERE id = ?", (goal_id,))
-        return self.row_to_dict(self.cursor.fetchone())
-
-    def get_active_goals(self, user_id: str):
-        self.cursor.execute(
-            """
-            SELECT * FROM learning_goals
-            WHERE user_id = ? AND status = 'active'
-            ORDER BY updated_at DESC
-            """,
-            (user_id,),
-        )
-        return [dict(row) for row in self.cursor.fetchall()]
-
     def abandon_active_question_sessions(self, user_id: str):
         self.cursor.execute(
             """
-            UPDATE goal_sessions
+            UPDATE learning_sessions
             SET status = 'abandoned', ended_at = datetime('now')
             WHERE user_id = ? AND session_type = 'question' AND status = 'active'
             """,
@@ -591,88 +426,20 @@ class SQLDatabase:
         )
         self.conn.commit()
 
-    def get_recent_active_goal(self, user_id: str):
-        goals = self.get_active_goals(user_id)
-        return goals[0] if goals else None
-
-    def get_syllabus_items(self, goal_id: str):
-        self.cursor.execute(
-            """
-            SELECT * FROM syllabus_items
-            WHERE goal_id = ?
-            ORDER BY position ASC
-            """,
-            (goal_id,),
-        )
-        return [dict(row) for row in self.cursor.fetchall()]
-
-    def get_current_syllabus_item(self, goal_id: str):
-        self.cursor.execute(
-            """
-            SELECT * FROM syllabus_items
-            WHERE goal_id = ? AND status != 'done'
-            ORDER BY position ASC
-            LIMIT 1
-            """,
-            (goal_id,),
-        )
-        row = self.cursor.fetchone()
-        if row:
-            return dict(row)
-        items = self.get_syllabus_items(goal_id)
-        return items[-1] if items else None
-
-    def update_syllabus_item(self, item_id: str, status: str | None = None, summary: str | None = None):
-        if status is None and summary is None:
-            return
-        assignments = ["updated_at = datetime('now')"]
-        values = []
-        if status is not None:
-            assignments.append("status = ?")
-            values.append(status)
-        if summary is not None:
-            assignments.append("summary = ?")
-            values.append(summary)
-        values.append(item_id)
-        self.cursor.execute(
-            f"UPDATE syllabus_items SET {', '.join(assignments)} WHERE id = ?",
-            values,
-        )
-        self.conn.commit()
-
-    def touch_goal(self, goal_id: str, summary: str | None = None, next_step: str | None = None, status: str | None = None):
-        assignments = ["updated_at = datetime('now')"]
-        values = []
-        if summary is not None:
-            assignments.append("summary = ?")
-            values.append(summary)
-        if next_step is not None:
-            assignments.append("next_step = ?")
-            values.append(next_step)
-        if status is not None:
-            assignments.append("status = ?")
-            values.append(status)
-        values.append(goal_id)
-        self.cursor.execute(
-            f"UPDATE learning_goals SET {', '.join(assignments)} WHERE id = ?",
-            values,
-        )
-        self.conn.commit()
-
-    def create_goal_session(self, user_id: str, session_type: str, goal_id: str | None = None, metadata: dict | None = None):
+    def create_learning_session(self, user_id: str, session_type: str, metadata: dict | None = None):
         session_id = self._new_id("sess")
         self.cursor.execute(
             f"""
-            INSERT INTO goal_sessions
-                (id, user_id, goal_id, session_type, status, started_at, metadata_json)
-            VALUES (?, ?, ?, ?, 'active', {self._now_sql()}, ?)
+            INSERT INTO learning_sessions
+                (id, user_id, session_type, status, started_at, metadata_json)
+            VALUES (?, ?, ?, 'active', {self._now_sql()}, ?)
             """,
-            (session_id, user_id, goal_id, session_type, self._json(metadata)),
+            (session_id, user_id, session_type, self._json(metadata)),
         )
         self.conn.commit()
         return session_id
 
-    def finish_goal_session(
+    def finish_learning_session(
         self,
         session_id: str,
         conversation_path: str | None = None,
@@ -682,7 +449,7 @@ class SQLDatabase:
     ):
         self.cursor.execute(
             f"""
-            UPDATE goal_sessions
+            UPDATE learning_sessions
             SET status = ?, ended_at = {self._now_sql()}, conversation_path = ?,
                 summary = ?, next_step = ?
             WHERE id = ?
@@ -691,10 +458,10 @@ class SQLDatabase:
         )
         self.conn.commit()
 
-    def save_goal_session_progress(self, session_id: str, conversation_path: str):
+    def save_learning_session_progress(self, session_id: str, conversation_path: str):
         self.cursor.execute(
             """
-            UPDATE goal_sessions
+            UPDATE learning_sessions
             SET conversation_path = ?
             WHERE id = ? AND status = 'active'
             """,
@@ -702,46 +469,10 @@ class SQLDatabase:
         )
         self.conn.commit()
 
-    def log_progress_event(
-        self,
-        user_id: str,
-        event_type: str,
-        content: str,
-        goal_id: str | None = None,
-        session_id: str | None = None,
-        evidence: str | None = None,
-        metadata: dict | None = None,
-    ):
-        event_id = self._new_id("event")
-        self.cursor.execute(
-            f"""
-            INSERT INTO goal_progress_events
-                (id, user_id, goal_id, session_id, event_type, content, evidence, created_at, metadata_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, {self._now_sql()}, ?)
-            """,
-            (event_id, user_id, goal_id, session_id, event_type, content, evidence, self._json(metadata)),
-        )
-        self.conn.commit()
-        return event_id
-
-    def link_question_to_goal(self, user_id: str, question_session_id: str, goal_id: str, confidence: float, evidence: str):
-        link_id = self._new_id("link")
-        self.cursor.execute(
-            f"""
-            INSERT INTO question_goal_links
-                (id, user_id, question_session_id, goal_id, confidence, evidence, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, {self._now_sql()})
-            """,
-            (link_id, user_id, question_session_id, goal_id, confidence, evidence),
-        )
-        self.conn.commit()
-        return link_id
-
     def write_audit_log(
         self,
         user_id: str,
         session_id: str | None,
-        goal_id: str | None,
         profile_backup_path: str | None,
         conversation_path: str | None,
         summary: str,
@@ -751,14 +482,13 @@ class SQLDatabase:
         self.cursor.execute(
             f"""
             INSERT INTO update_audit_log
-                (id, user_id, session_id, goal_id, profile_backup_path, conversation_path, summary, changes_json, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, {self._now_sql()})
+                (id, user_id, session_id, profile_backup_path, conversation_path, summary, changes_json, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, {self._now_sql()})
             """,
             (
                 audit_id,
                 user_id,
                 session_id,
-                goal_id,
                 profile_backup_path,
                 conversation_path,
                 summary,

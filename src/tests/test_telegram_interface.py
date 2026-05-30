@@ -12,11 +12,8 @@ from unittest.mock import patch
 from interface.text_chat import (
     BUTTON_ASK,
     BUTTON_DONE,
-    BUTTON_GOALS,
     BUTTON_HELP,
-    BUTTON_MAKE_GOAL,
     BUTTON_PROFILE,
-    BUTTON_START_GOAL,
     TelegramConfig,
     TelegramTutorBot,
     load_config,
@@ -34,7 +31,6 @@ class FakeSession:
         self.calls = []
         self.mode = "idle"
         self.active_session_id = None
-        self.active_goals = False
 
     def startup_message(self):
         return f"startup for {self.user_id}"
@@ -44,27 +40,10 @@ class FakeSession:
         if text.startswith("/ask"):
             self.mode = "question"
             self.active_session_id = self.active_session_id or "question_session"
-        elif text.startswith("/goal"):
-            self.mode = "goal_intake"
-        elif text == "/continue":
-            self.mode = "goal"
-            self.active_goals = True
-            self.active_session_id = self.active_session_id or "goal_session"
-        elif not text.startswith("/") and self.mode == "goal_intake":
-            self.mode = "goal_confirm"
-        elif not text.startswith("/") and self.mode == "goal_confirm" and text.lower() in {"yes", "yep"}:
-            self.mode = "goal"
-            self.active_goals = True
-            self.active_session_id = self.active_session_id or "goal_session"
-        elif not text.startswith("/") and self.mode == "goal_confirm":
-            self.mode = "goal_intake"
-        elif not text.startswith("/") and self.mode != "goal":
+        elif not text.startswith("/"):
             self.mode = "question"
             self.active_session_id = self.active_session_id or "question_session"
         return SimpleNamespace(text=f"handled {text}", should_quit=False)
-
-    def has_active_goal(self):
-        return self.active_goals
 
 
 class FakeOnboarding:
@@ -157,7 +136,6 @@ def test_start_initializes_user_session_and_keyboard():
         assert update.message.replies[0][0] == "startup for telegram_123"
         assert update.message.replies[0][1] is not None
         assert keyboard_text(update.message.replies[0][1]) == (
-            ("Start Goal",),
             ("Ask Question",),
             ("Profile", "Help"),
         )
@@ -217,17 +195,13 @@ def test_onboarding_completion_creates_session_and_shows_options():
         assert is_keyboard_remove(update.message.replies[0][1])
         assert update.message.replies[1][0] == (
             "onboarding complete\n\n"
-            "Let's start with that as a quick question. You can use \"Make This A Goal\" "
-            "if you want to turn it into a longer track.\n\n"
+            "Let's start with that as a quick question.\n\n"
             "handled /ask how tiny games work"
         )
         assert update.message.replies[1][1] is not None
         assert keyboard_text(update.message.replies[1][1]) == (
-            (
-                ("Start Goal",),
-                ("Ask Question", "Make This A Goal"),
-                ("Done", "Profile", "Help"),
-            )
+            ("Ask Question",),
+            ("Done", "Profile", "Help"),
         )
         assert bot._route_text(123, BUTTON_HELP) == "handled /help"
         assert sessions["telegram_123"].calls[0] == "/ask how tiny games work"
@@ -244,7 +218,6 @@ def test_onboarding_completion_without_topic_shows_exploratory_startup():
         assert update.message.replies[0][0].startswith("Before we begin")
         assert "No topic picked" in update.message.replies[1][0]
         assert "Ask Question or /ask <question>" in update.message.replies[1][0]
-        assert "Start Goal or /goal <topic>" in update.message.replies[1][0]
         assert "startup for telegram_123" not in update.message.replies[1][0]
         assert sessions["telegram_123"].calls == []
 
@@ -268,19 +241,6 @@ def test_unauthorized_user_is_rejected_and_logged():
         assert record["command"] == "start"
 
 
-def test_start_goal_button_consumes_next_text_as_goal():
-    with TemporaryDirectory() as dirname:
-        bot, sessions, _ = make_bot(Path(dirname))
-        assert bot._route_text(123, BUTTON_START_GOAL) == "What do you want to learn?"
-        assert bot._route_text(123, "learn Kalman filters") == "handled /goal learn Kalman filters"
-        assert sessions["telegram_123"].mode == "goal_intake"
-        assert bot._route_text(123, "from a controls angle") == "handled from a controls angle"
-        assert sessions["telegram_123"].mode == "goal_confirm"
-        assert bot._route_text(123, "yes") == "handled yes"
-        assert sessions["telegram_123"].mode == "goal"
-        assert sessions["telegram_123"].calls == ["/goal learn Kalman filters", "from a controls angle", "yes"]
-
-
 def test_ask_button_consumes_next_text_as_question_and_followups_continue():
     with TemporaryDirectory() as dirname:
         bot, sessions, _ = make_bot(Path(dirname))
@@ -297,7 +257,6 @@ def test_buttons_map_to_existing_commands():
     with TemporaryDirectory() as dirname:
         bot, sessions, _ = make_bot(Path(dirname))
         expected = {
-            BUTTON_GOALS: "/goals",
             BUTTON_DONE: "/done",
             BUTTON_PROFILE: "/profile",
             BUTTON_HELP: "/help",
@@ -307,49 +266,18 @@ def test_buttons_map_to_existing_commands():
         assert sessions["telegram_123"].calls == list(expected.values())
 
 
-def test_make_this_a_goal_promotes_last_one_off_question():
+def test_keyboard_hides_done_without_active_session():
     with TemporaryDirectory() as dirname:
-        bot, sessions, _ = make_bot(Path(dirname))
-        bot._route_text(123, BUTTON_ASK)
-        bot._route_text(123, "what is covariance?")
-        assert bot._route_text(123, BUTTON_MAKE_GOAL) == "handled /goal what is covariance?"
-        assert sessions["telegram_123"].calls == [
-            "/ask what is covariance?",
-            "/goal what is covariance?",
-        ]
-
-
-def test_make_this_a_goal_without_question_prompts_for_goal_text():
-    with TemporaryDirectory() as dirname:
-        bot, sessions, _ = make_bot(Path(dirname))
-        assert bot._route_text(123, BUTTON_MAKE_GOAL) == "What should the goal be?"
-        assert bot._route_text(123, "learn control theory") == "handled /goal learn control theory"
-        assert sessions["telegram_123"].mode == "goal_intake"
-        assert sessions["telegram_123"].calls == ["/goal learn control theory"]
-
-
-def test_keyboard_hides_buttons_without_targets():
-    with TemporaryDirectory() as dirname:
-        bot, sessions, _ = make_bot(Path(dirname))
+        bot, _, _ = make_bot(Path(dirname))
         bot._get_session(123)
         assert bot._button_rows(123) == [
-            [BUTTON_START_GOAL],
             [BUTTON_ASK],
             [BUTTON_PROFILE, BUTTON_HELP],
         ]
 
         bot._route_text(123, "what is covariance?")
         assert bot._button_rows(123) == [
-            [BUTTON_START_GOAL],
-            [BUTTON_ASK, BUTTON_MAKE_GOAL],
-            [BUTTON_DONE, BUTTON_PROFILE, BUTTON_HELP],
-        ]
-
-        sessions["telegram_123"].active_goals = True
-        assert bot._button_rows(123) == [
-            ["Continue Goal", BUTTON_START_GOAL],
-            [BUTTON_ASK, BUTTON_MAKE_GOAL],
-            ["My Goals"],
+            [BUTTON_ASK],
             [BUTTON_DONE, BUTTON_PROFILE, BUTTON_HELP],
         ]
 
@@ -357,7 +285,7 @@ def test_keyboard_hides_buttons_without_targets():
 def test_slash_command_clears_pending_action():
     with TemporaryDirectory() as dirname:
         bot, sessions, _ = make_bot(Path(dirname))
-        bot._route_text(123, BUTTON_START_GOAL)
+        bot._route_text(123, BUTTON_ASK)
         assert bot._route_text(123, "/help") == "handled /help"
         assert bot._route_text(123, "plain followup") == "handled plain followup"
         assert sessions["telegram_123"].calls == ["/help", "plain followup"]
@@ -390,12 +318,9 @@ if __name__ == "__main__":
     test_onboarding_completion_creates_session_and_shows_options()
     test_onboarding_completion_without_topic_shows_exploratory_startup()
     test_unauthorized_user_is_rejected_and_logged()
-    test_start_goal_button_consumes_next_text_as_goal()
     test_ask_button_consumes_next_text_as_question_and_followups_continue()
     test_buttons_map_to_existing_commands()
-    test_make_this_a_goal_promotes_last_one_off_question()
-    test_make_this_a_goal_without_question_prompts_for_goal_text()
-    test_keyboard_hides_buttons_without_targets()
+    test_keyboard_hides_done_without_active_session()
     test_slash_command_clears_pending_action()
     test_long_responses_are_split_into_safe_chunks()
     test_app_can_be_constructed_from_fake_env_without_network()

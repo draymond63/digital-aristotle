@@ -9,16 +9,13 @@ from brains.comms.prompts_teacher import TEACHER_PROMPT
 from brains.comms.prompts_session import (
     PROFILE_UPDATE_GATE_PROMPT,
     QUESTION_TOPIC_RESOLUTION_PROMPT,
-    QUESTION_GOAL_LINK_PROMPT,
     SESSION_FINALIZATION_PROMPT,
-    SYLLABUS_PROMPT,
     TOPIC_GRAPH_CONNECTION_PROMPT,
 )
 from brains.comms.task_conversation import TaskConversation
 from brains.data.db_sql import SQLDatabase
 from brains.data.db_vector import Collection, SemanticDatabase
 from brains.data.profile import Profile, normalize_identifier
-from brains.goal_intake import GoalIntake
 from brains.session_types import CommandResult, FinalizationReport, HELP_TEXT, SessionMode
 
 
@@ -39,18 +36,8 @@ class LearningSession(TaskConversation):
         self.teacher_context = ""
         self.sql_db.abandon_active_question_sessions(self.user_id)
         self.mode: SessionMode = "idle"
-        self.active_goal_id: str | None = None
         self.active_session_id: str | None = None
         self.active_topic_id: str | None = None
-        self.active_syllabus_item_id: str | None = None
-        self.goal_intake_flow = GoalIntake(
-            agent=self.agent,
-            profile=self.profile,
-            create_goal=self.create_goal,
-            close_active_question=self._close_active_question_session,
-            reset_conversation=self._reset_conversation,
-            set_mode=self._set_mode,
-        )
         self.teacher_task = Task(
             "teacher",
             TEACHER_PROMPT,
@@ -59,14 +46,6 @@ class LearningSession(TaskConversation):
             dynamic_after_context=True,
             temperature=0.35,
             num_predict=360,
-        )
-        self.syllabus_task = Task(
-            "syllabus_planner",
-            SYLLABUS_PROMPT,
-            model=get_control_model(),
-            output_format="json",
-            temperature=0.2,
-            num_predict=700,
         )
         self.finalization_task = Task(
             "session_finalizer",
@@ -104,83 +83,9 @@ class LearningSession(TaskConversation):
             temperature=0.0,
             num_predict=450,
         )
-        self.question_link_task = Task(
-            "question_goal_linker",
-            QUESTION_GOAL_LINK_PROMPT,
-            model=get_control_model(),
-            output_format="json",
-            temperature=0.0,
-            num_predict=160,
-        )
-
-    @property
-    def goal_intake(self) -> list[str]:
-        return self.goal_intake_flow.messages
-
-    @goal_intake.setter
-    def goal_intake(self, value: list[str]):
-        self.goal_intake_flow.messages = value
-
-    @property
-    def goal_intake_transcript(self) -> list[tuple[str, str]]:
-        return [
-            (message.role, message.content)
-            for message in self.goal_intake_flow.conversation.visible_messages()
-        ]
-
-    @goal_intake_transcript.setter
-    def goal_intake_transcript(self, value: list[tuple[str, str]]):
-        self.goal_intake_flow.conversation = Conversation()
-        for role, content in value:
-            if role == "user":
-                self.goal_intake_flow.conversation.append_user(content)
-            else:
-                self.goal_intake_flow.conversation.append_task_result(
-                    self.goal_intake_flow.responder_task,
-                    content,
-                    role="assistant",
-                )
-
-    @property
-    def pending_goal_theme(self) -> str | None:
-        return self.goal_intake_flow.pending_theme
-
-    @pending_goal_theme.setter
-    def pending_goal_theme(self, value: str | None):
-        self.goal_intake_flow.pending_theme = value
-
-    @property
-    def pending_goal_adjacent(self) -> list[str]:
-        return self.goal_intake_flow.pending_adjacent
-
-    @pending_goal_adjacent.setter
-    def pending_goal_adjacent(self, value: list[str]):
-        self.goal_intake_flow.pending_adjacent = value
-
-    @property
-    def pending_resolved_goal(self) -> str | None:
-        return self.goal_intake_flow.pending_resolved_goal
-
-    @pending_resolved_goal.setter
-    def pending_resolved_goal(self, value: str | None):
-        self.goal_intake_flow.pending_resolved_goal = value
 
     def startup_message(self) -> str:
-        goal = self.sql_db.get_recent_active_goal(self.user_id)
-        lines = [f"Hi {self.user_id}. What do you want to understand today?"]
-        if goal:
-            lines.extend([
-                "",
-                f"Most recent goal: {goal['title']}",
-                f"Next step: {goal.get('next_step') or 'continue from the current milestone'}",
-                "Type /continue to pick it back up, /ask <question> for a one-off, or /goal <topic> to start a new path.",
-            ])
-        else:
-            lines.append("Type /goal <topic> for a long-term path, or just ask a one-off question.")
-        return "\n".join(lines)
-
-    def _set_mode(self, mode: str):
-        self.mode = mode
+        return f"Hi {self.user_id}. What do you want to understand today?"
 
     def handle(self, text: str) -> CommandResult:
         text = text.strip()
@@ -188,12 +93,6 @@ class LearningSession(TaskConversation):
             return CommandResult("")
         if text.startswith("/"):
             return self.handle_command(text)
-        if self.mode in {"goal_intake", "goal_confirm"}:
-            return CommandResult(self.goal_intake_flow.continue_intake(text, self.mode))
-        if self.mode == "syllabus_review" and self.active_goal_id:
-            return CommandResult(self._handle_syllabus_review(text))
-        if self.mode == "goal" and self.active_goal_id:
-            return CommandResult(self._goal_turn(text))
         return CommandResult(self.ask(text))
 
     def handle_command(self, text: str) -> CommandResult:
@@ -201,17 +100,9 @@ class LearningSession(TaskConversation):
         command = command.lower()
         arg = arg.strip()
         match command:
-            case "/goal" | "/learn":
-                return CommandResult(self.goal_intake_flow.start(arg or None))
-            case "/continue":
-                self.goal_intake_flow.clear()
-                return CommandResult(self.continue_goal())
-            case "/goals":
-                return CommandResult(self.render_goals())
             case "/ask":
                 if not arg:
                     return CommandResult("Ask it like this: /ask what is covariance?")
-                self.goal_intake_flow.clear()
                 return CommandResult(self.ask(arg))
             case "/done":
                 return CommandResult(self.finalize().render())
@@ -225,11 +116,8 @@ class LearningSession(TaskConversation):
                 path = self.save_partial(close_status="saved")
                 self._reset_conversation()
                 self.mode = "idle"
-                self.active_goal_id = None
                 self.active_session_id = None
                 self.active_topic_id = None
-                self.active_syllabus_item_id = None
-                self.goal_intake_flow.clear()
                 return CommandResult(f"Saved the previous conversation to {path}\nFresh session ready.")
             case "/help":
                 return CommandResult(HELP_TEXT)
@@ -239,174 +127,11 @@ class LearningSession(TaskConversation):
             case _:
                 return CommandResult(f"I do not know {command} yet.\n\n{HELP_TEXT}")
 
-    def create_goal(self, target: str) -> str:
-        self._close_active_question_session(status="answered")
-        plan = self._generate_syllabus(target)
-        title = plan["title"]
-        topic_id = normalize_identifier(plan.get("target_topic") or target)
-        duplicate = self._find_duplicate_goal(title, target, topic_id)
-        if duplicate:
-            self.active_goal_id = duplicate["id"]
-            self.active_topic_id = duplicate.get("target_topic_id")
-            self.mode = "goal"
-            self.active_session_id = self.sql_db.create_goal_session(
-                self.user_id,
-                session_type="goal",
-                goal_id=self.active_goal_id,
-                metadata={"resumed_from_duplicate_request": target},
-            )
-            self._reset_conversation()
-            self._apply_goal_context()
-            item = self.sql_db.get_current_syllabus_item(self.active_goal_id)
-            if item:
-                self.active_syllabus_item_id = item["id"]
-                self.sql_db.update_syllabus_item(item["id"], status="active")
-            return (
-                f"You already have this active goal: {duplicate['title']}\n"
-                f"Picking it back up instead of creating a duplicate.\n"
-                f"Current milestone: {item['title'] if item else 'open exploration'}\n"
-                f"Next step: {duplicate.get('next_step') or (item.get('objective') if item else 'continue the lesson')}"
-            )
-        goal_id = self.sql_db.create_learning_goal(
-            user_id=self.user_id,
-            title=title,
-            target=target,
-            target_topic_id=topic_id,
-            target_topic_name=plan.get("topic_name") or title,
-        )
-        self.sql_db.create_syllabus(goal_id, title, plan["milestones"])
-        self.active_goal_id = goal_id
-        self.active_topic_id = topic_id
-        self.mode = "syllabus_review"
-        self.active_session_id = None
-        self.active_syllabus_item_id = None
-
-        syllabus = self._render_syllabus(goal_id)
-        return (
-            f"Created learning goal: {title}\n\n"
-            f"{syllabus}\n\n"
-            "Take a look at the syllabus before we start. "
-            "Say 'looks good' to begin, or tell me what to add, remove, reorder, or change."
-        )
-
-    def _find_duplicate_goal(self, title: str, target: str, topic_id: str):
-        normalized_target = normalize_identifier(target)
-        normalized_title = normalize_identifier(title)
-        for goal in self.sql_db.get_active_goals(self.user_id):
-            if goal.get("target_topic_id") == topic_id:
-                return goal
-            if normalize_identifier(goal.get("target", "")) == normalized_target:
-                return goal
-            if normalize_identifier(goal.get("title", "")) == normalized_title:
-                return goal
-        return None
-
-    def continue_goal(self) -> str:
-        self._close_active_question_session(status="answered")
-        goal = self.sql_db.get_recent_active_goal(self.user_id)
-        if not goal:
-            return "No active goals yet. Start one with /goal <topic>."
-        self.active_goal_id = goal["id"]
-        self.active_topic_id = goal.get("target_topic_id")
-        self.mode = "goal"
-        self.active_session_id = self.sql_db.create_goal_session(
-            self.user_id,
-            session_type="goal",
-            goal_id=self.active_goal_id,
-        )
-        self._reset_conversation()
-        self._apply_goal_context()
-        item = self.sql_db.get_current_syllabus_item(self.active_goal_id)
-        if item:
-            self.active_syllabus_item_id = item["id"]
-            self.sql_db.update_syllabus_item(item["id"], status="active")
-        return (
-            f"Picking up: {goal['title']}\n"
-            f"Current milestone: {item['title'] if item else 'open exploration'}\n"
-            f"Next step: {goal.get('next_step') or (item.get('objective') if item else 'continue the lesson')}"
-        )
-
-    def _handle_syllabus_review(self, text: str) -> str:
-        if self._is_syllabus_approval(text):
-            return self._begin_goal_lesson()
-        self._revise_syllabus(text)
-        return (
-            f"Updated syllabus:\n{self._render_syllabus(self.active_goal_id)}\n\n"
-            "How does this look? Say 'looks good' to begin, or keep refining it."
-        )
-
-    def _begin_goal_lesson(self) -> str:
-        if not self.active_goal_id:
-            return "No active goal is waiting for a syllabus review. Start one with /goal <topic>."
-        goal = self.sql_db.get_goal(self.active_goal_id)
-        self.mode = "goal"
-        self.active_session_id = self.sql_db.create_goal_session(
-            self.user_id,
-            session_type="goal",
-            goal_id=self.active_goal_id,
-            metadata={"target": goal["target"], "started_after_syllabus_review": True},
-        )
-        self._reset_conversation()
-        self._apply_goal_context()
-        first_item = self.sql_db.get_current_syllabus_item(self.active_goal_id)
-        if first_item:
-            self.active_syllabus_item_id = first_item["id"]
-            self.sql_db.update_syllabus_item(first_item["id"], status="active")
-        first_prompt = first_item["objective"] if first_item else goal["target"]
-        response = self._goal_turn(f"Start this learning goal: {first_prompt}")
-        return f"Great. Syllabus saved.\n\nStarting with the first milestone.\n\n{response}"
-
-    def _revise_syllabus(self, feedback: str):
-        goal = self.sql_db.get_goal(self.active_goal_id)
-        current_syllabus = self._render_syllabus(self.active_goal_id)
-        conversation = Conversation()
-        conversation.append_user(
-            f"Requested syllabus change:\n{feedback}\n\n"
-            "Revise the syllabus to reflect the requested change."
-        )
-        dynamic_prompts = [
-            f"User profile:\n{self.profile}",
-            f"Requested goal:\n{goal['target']}",
-            f"Current syllabus:\n{current_syllabus}",
-        ]
-        try:
-            plan = self.agent.run_task_json(self.syllabus_task, conversation, dynamic_prompts=dynamic_prompts)
-        except Exception:
-            plan = {}
-        milestones = plan.get("milestones") if isinstance(plan, dict) else None
-        if not milestones:
-            return
-        title = plan.get("title") or goal["title"]
-        self.sql_db.replace_syllabus(self.active_goal_id, title, self._calibrate_milestones(goal["target"], milestones[:6]))
-
-    @staticmethod
-    def _is_syllabus_approval(text: str) -> bool:
-        normalized = normalize_identifier(text)
-        return normalized in {
-            "yes",
-            "y",
-            "yep",
-            "yeah",
-            "looks_good",
-            "looks_good_to_me",
-            "good",
-            "start",
-            "start_it",
-            "begin",
-            "begin_lesson",
-            "go",
-            "go_ahead",
-            "approved",
-            "approve",
-        }
-
     def ask(self, question: str) -> str:
         if self.mode != "question" or not self.active_session_id:
             self._reset_conversation()
             self.mode = "question"
-            self.active_goal_id = None
-            self.active_syllabus_item_id = None
-            self.active_session_id = self.sql_db.create_goal_session(
+            self.active_session_id = self.sql_db.create_learning_session(
                 self.user_id,
                 session_type="question",
                 metadata={"question": question},
@@ -419,10 +144,9 @@ class LearningSession(TaskConversation):
             user_id=self.user_id,
         )
         response = "\n\n".join(self._respond(question))
-        self._maybe_link_question_to_goal(question)
         conversation_path = self._write_conversation()
         if self.active_session_id:
-            self.sql_db.save_goal_session_progress(
+            self.sql_db.save_learning_session_progress(
                 self.active_session_id,
                 conversation_path=conversation_path,
             )
@@ -434,31 +158,13 @@ class LearningSession(TaskConversation):
         updates = self._finalize_updates()
         summary = updates.get("summary") or "we made progress on the current question"
         next_step = updates.get("next_step") or "continue from the last useful question"
-        milestone_status = updates.get("milestone_status", "continue")
-        if milestone_status not in {"done", "continue"}:
-            milestone_status = "continue"
 
         topics_updated, topic_update_notes = self._apply_topic_updates(updates.get("topic_updates", []))
         memories_saved = self._save_memories(updates.get("memories", []))
         graph_changes = self._apply_graph_updates(updates.get("graph_updates", {}))
 
-        if self.active_goal_id:
-            self.sql_db.touch_goal(self.active_goal_id, summary=summary, next_step=next_step)
-            if self.active_syllabus_item_id:
-                item_status = "done" if milestone_status == "done" else "active"
-                self.sql_db.update_syllabus_item(self.active_syllabus_item_id, status=item_status, summary=summary)
-            self.sql_db.log_progress_event(
-                self.user_id,
-                event_type="session_finalized",
-                content=summary,
-                goal_id=self.active_goal_id,
-                session_id=self.active_session_id,
-                evidence=summary,
-                metadata={"next_step": next_step},
-            )
-
         if self.active_session_id:
-            self.sql_db.finish_goal_session(
+            self.sql_db.finish_learning_session(
                 self.active_session_id,
                 conversation_path=conversation_path,
                 summary=summary,
@@ -468,7 +174,6 @@ class LearningSession(TaskConversation):
         audit_id = self.sql_db.write_audit_log(
             user_id=self.user_id,
             session_id=self.active_session_id,
-            goal_id=self.active_goal_id,
             profile_backup_path=backup_path,
             conversation_path=conversation_path,
             summary=summary,
@@ -480,7 +185,6 @@ class LearningSession(TaskConversation):
             conversation_path=conversation_path,
             profile_backup_path=backup_path,
             audit_id=audit_id,
-            milestone_status=milestone_status,
             memories_saved=memories_saved,
             topics_updated=topics_updated,
             topic_update_notes=topic_update_notes,
@@ -489,65 +193,30 @@ class LearningSession(TaskConversation):
         self._reset_conversation()
         self.mode = "idle"
         self.active_session_id = None
-        self.active_goal_id = None
-        self.active_syllabus_item_id = None
-        self.goal_intake_flow.clear()
+        self.active_topic_id = None
         return report
 
     def save_partial(self, close_status: str | None = None) -> str:
         path = self._write_conversation()
         if self.active_session_id and close_status:
-            self.sql_db.finish_goal_session(
+            self.sql_db.finish_learning_session(
                 self.active_session_id,
                 conversation_path=path,
                 status=close_status,
             )
         elif self.active_session_id:
-            self.sql_db.save_goal_session_progress(self.active_session_id, path)
+            self.sql_db.save_learning_session_progress(self.active_session_id, path)
         return path
-
-    def _close_active_question_session(self, status: str):
-        if self.mode != "question" or not self.active_session_id:
-            return
-        path = self._write_conversation()
-        self.sql_db.finish_goal_session(
-            self.active_session_id,
-            conversation_path=path,
-            status=status,
-        )
-        self.active_session_id = None
 
     def _write_conversation(self) -> str:
         filename = f"{self.user_id}-{datetime.now().isoformat(timespec='seconds').replace(':', '-')}"
         self.conversation.save(filename)
         return str(Path("data/conversations") / f"{filename}.json")
 
-    def render_goals(self) -> str:
-        goals = self.sql_db.get_active_goals(self.user_id)
-        if not goals:
-            return "No active goals yet. Start one with /goal <topic>."
-        rendered = ["Active goals:"]
-        for goal in goals:
-            item = self.sql_db.get_current_syllabus_item(goal["id"])
-            rendered.append(
-                f"- {goal['title']} [{goal['status']}]\n"
-                f"  Current: {item['title'] if item else 'open exploration'}\n"
-                f"  Next: {goal.get('next_step') or (item.get('objective') if item else 'continue')}"
-            )
-        return "\n".join(rendered)
-
     def render_topic(self) -> str:
-        if self.active_goal_id:
-            goal = self.sql_db.get_goal(self.active_goal_id)
-            item = self.sql_db.get_current_syllabus_item(self.active_goal_id)
-            return (
-                f"Goal: {goal['title']}\n"
-                f"Topic: {goal.get('target_topic_id')}\n"
-                f"Current milestone: {item['title'] if item else 'open exploration'}"
-            )
         if self.active_topic_id:
             return f"Current topic: {self.active_topic_id}"
-        return "No active topic. Ask a question or start a goal with /goal <topic>."
+        return "No active topic yet. Ask a question first."
 
     def render_profile(self) -> str:
         lines = [f"Profile for {self.user_id}"]
@@ -578,16 +247,7 @@ class LearningSession(TaskConversation):
         if self.profile.interests:
             lines.append("")
             lines.append("Interests: " + ", ".join(item.replace("_", " ") for item in self.profile.interests))
-        goal = self.sql_db.get_recent_active_goal(self.user_id)
-        if goal:
-            lines.append("")
-            lines.append(f"Most recent active goal: {goal['title']}")
-            lines.append(f"Next: {goal.get('next_step') or 'continue from the current milestone'}")
         return "\n".join(lines)
-
-    def _goal_turn(self, text: str) -> str:
-        self._apply_goal_context()
-        return "\n\n".join(self._respond(text))
 
     def _reset_conversation(self):
         self.conversation = Conversation()
@@ -598,126 +258,11 @@ class LearningSession(TaskConversation):
         dynamic_prompts = [self.teacher_context] if self.teacher_context else []
         yield from self.stream_task(self.teacher_task, self.conversation, dynamic_prompts=dynamic_prompts)
 
-    def _generate_syllabus(self, target: str) -> dict:
-        conversation = Conversation()
-        conversation.append_user(f"Requested goal:\n{target}")
-        dynamic_prompts = [
-            f"User profile:\n{self.profile}",
-            f"Related topic context:\n{self.sql_db.get_related_topics_pretty([normalize_identifier(target)])}",
-        ]
-        try:
-            plan = self.agent.run_task_json(self.syllabus_task, conversation, dynamic_prompts=dynamic_prompts)
-        except Exception:
-            plan = {}
-        milestones = plan.get("milestones") if isinstance(plan, dict) else None
-        if not milestones:
-            topic = normalize_identifier(target)
-            readable = target.strip().capitalize()
-            milestones = [
-                {"title": f"Orient around {readable}", "objective": f"Build an intuitive map of {target}."},
-                {"title": "Core mechanism", "objective": "Understand the central moving parts and why they matter."},
-                {"title": "Worked example", "objective": "Apply the idea to a concrete example."},
-                {"title": "Deeper structure", "objective": "Connect the idea to adjacent concepts and edge cases."},
-            ]
-            plan = {"title": readable, "target_topic": topic, "milestones": milestones}
-        plan["title"] = plan.get("title") or target.strip().capitalize()
-        plan["target_topic"] = normalize_identifier(plan.get("target_topic") or target)
-        plan["milestones"] = self._calibrate_milestones(target, milestones[:6])
-        return plan
-
-    def _calibrate_milestones(self, target: str, milestones: list[dict]) -> list[dict]:
-        if not milestones:
-            return milestones
-        target_lower = target.lower()
-        first_title = milestones[0].get("title", "").lower()
-        generic_starts = ("foundations of vector", "basic vector", "vector spaces", "fundamentals of vector")
-        if "attention" in target_lower and any(first_title.startswith(prefix) for prefix in generic_starts):
-            return [
-                {
-                    "title": "Query-key similarity as geometry",
-                    "objective": "See attention as comparing token vectors by direction and alignment.",
-                },
-                {
-                    "title": "Attention weights as soft selection",
-                    "objective": "Understand how similarity scores become a weighted blend of value vectors.",
-                },
-                {
-                    "title": "Multi-head attention as multiple views",
-                    "objective": "Understand how separate heads attend to different geometric relationships.",
-                },
-                *milestones[1:4],
-            ][:6]
-        if "spectral sequence" in target_lower:
-            advanced_starts = ("chain complex", "understand chain", "homology", "filtered complex")
-            if "from scratch" in target_lower or any(first_title.startswith(prefix) for prefix in advanced_starts):
-                return [
-                    {
-                        "title": "Topology as flexible sameness",
-                        "objective": "Build intuition for continuous deformation, holes, and why topology studies shape without rigid geometry.",
-                    },
-                    {
-                        "title": "From shapes to algebra",
-                        "objective": "See why algebraic topology translates geometric features into groups, maps, and computations.",
-                    },
-                    {
-                        "title": "Chains, boundaries, and homology",
-                        "objective": "Understand chains and boundaries as a bookkeeping system for holes.",
-                    },
-                    {
-                        "title": "Filtrations as layered information",
-                        "objective": "Understand how a complex can be revealed in stages before introducing spectral sequences.",
-                    },
-                    {
-                        "title": "Spectral sequences as organized approximation",
-                        "objective": "See pages and differentials as a disciplined way to track what survives through layers.",
-                    },
-                    *milestones[1:2],
-                ][:6]
-        return milestones
-
-    def _render_syllabus(self, goal_id: str) -> str:
-        items = self.sql_db.get_syllabus_items(goal_id)
-        lines = ["Syllabus:"]
-        for item in items:
-            lines.append(f"{item['position']}. {item['title']} - {item.get('objective') or ''}".rstrip())
-        return "\n".join(lines)
-
-    def _apply_goal_context(self):
-        if not self.active_goal_id:
-            return
-        goal = self.sql_db.get_goal(self.active_goal_id)
-        items = self.sql_db.get_syllabus_items(self.active_goal_id)
-        current = self.sql_db.get_current_syllabus_item(self.active_goal_id)
-        syllabus_text = "\n".join(
-            f"{item['position']}. {item['title']} [{item['status']}]: {item.get('objective') or ''}"
-            for item in items
-        )
-        memories = self._query_memories(goal["target"], topic_hints=[goal.get("target_topic_id") or goal["target"]])
-        self.teacher_context = (
-            f"User profile:\n{self.profile}\n\n"
-            f"Active long-term goal:\n{goal['title']}\n"
-            f"Target topic: {goal.get('target_topic_id')}\n"
-            f"Current milestone: {current['title'] if current else 'open exploration'}\n"
-            f"Milestone objective: {current.get('objective') if current else goal['target']}\n"
-            f"Previous goal summary: {goal.get('summary') or 'none yet'}\n"
-            f"Next recommended step: {goal.get('next_step') or 'start from the current milestone'}\n\n"
-            f"Syllabus:\n{syllabus_text}\n\n"
-            f"Relevant memories:\n{memories}"
-        )
-
     def _build_question_context(self, question: str) -> str:
-        active_goal = self.sql_db.get_recent_active_goal(self.user_id)
-        goal_text = ""
-        if active_goal:
-            goal_text = (
-                f"Potentially related active goal: {active_goal['title']}\n"
-                "Do not turn this one-off question into a learning goal unless the user explicitly asks.\n"
-            )
         return (
             f"User profile:\n{self.profile}\n\n"
-            f"{goal_text}"
             f"Relevant memories:\n{self._query_memories(question, topic_hints=self._graph_connected_profile_topic_hints(question))}\n\n"
-            "Answer this as a one-off learning turn. Keep it useful and lightweight.\n"
+            "Answer this as a focused learning conversation. Keep it useful and lightweight.\n"
             "Use the learner's own wording as the starting point, not a generic overview.\n"
             "If they propose a mental model, sharpen that model and explain the practical consequence.\n"
             "If they say they are fuzzy, answer the fuzzy distinction directly before offering advice.\n"
@@ -909,42 +454,6 @@ class LearningSession(TaskConversation):
             if item and item not in deduped:
                 deduped.append(item)
         return deduped[:8]
-
-    def _maybe_link_question_to_goal(self, question: str):
-        if not self.active_session_id:
-            return
-        goals = self.sql_db.get_active_goals(self.user_id)
-        if not goals:
-            return
-        conversation = Conversation()
-        conversation.append_user(question)
-        active_goals = [
-            {
-                "goal_id": goal["id"],
-                "title": goal["title"],
-                "target": goal["target"],
-                "summary": goal.get("summary"),
-            }
-            for goal in goals
-        ]
-        try:
-            result = self.agent.run_task_json(
-                self.question_link_task,
-                conversation,
-                dynamic_prompts=[f"Active goals:\n{json.dumps(active_goals, ensure_ascii=True)}"],
-            )
-        except Exception:
-            result = {"link": False}
-        if result.get("link") and float(result.get("confidence", 0)) >= 0.75:
-            goal_id = result.get("goal_id")
-            if any(goal["id"] == goal_id for goal in goals):
-                self.sql_db.link_question_to_goal(
-                    self.user_id,
-                    self.active_session_id,
-                    goal_id,
-                    float(result.get("confidence", 0)),
-                    result.get("evidence", "Model linked this question to the goal."),
-                )
 
     def _finalize_updates(self) -> dict:
         try:
