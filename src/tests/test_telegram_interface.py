@@ -45,6 +45,19 @@ class FakeSession:
             self.active_session_id = self.active_session_id or "question_session"
         return SimpleNamespace(text=f"handled {text}", should_quit=False)
 
+    def stream_ask(self, question: str):
+        self.calls.append(f"stream:{question}")
+        self.mode = "question"
+        self.active_session_id = self.active_session_id or "question_session"
+        yield f"chunk one for {question}"
+        yield "chunk two"
+
+    def finalize(self):
+        self.calls.append("finalize")
+        self.mode = "idle"
+        self.active_session_id = None
+        return SimpleNamespace(render=lambda: "finalized previous question")
+
 
 class FakeOnboarding:
     def __init__(self, user_id: str):
@@ -251,6 +264,34 @@ def test_ask_button_consumes_next_text_as_question_and_followups_continue():
         assert bot._route_text(123, "give me a geometric example") == "handled give me a geometric example"
         assert session.active_session_id == first_session_id
         assert session.calls == ["/ask what is covariance?", "give me a geometric example"]
+
+
+def test_regular_message_streams_teacher_chunks():
+    with TemporaryDirectory() as dirname:
+        bot, sessions, _ = make_bot(Path(dirname))
+        update = FakeUpdate(text="what is covariance?")
+        asyncio.run(bot.message(update, SimpleNamespace()))
+        assert [reply[0] for reply in update.message.replies] == [
+            "chunk one for what is covariance?",
+            "chunk two",
+        ]
+        assert sessions["telegram_123"].calls == ["stream:what is covariance?"]
+
+
+def test_ask_command_finalizes_active_question_then_streams_new_question():
+    with TemporaryDirectory() as dirname:
+        bot, sessions, _ = make_bot(Path(dirname))
+        session = bot._get_session(123)
+        session.mode = "question"
+        session.active_session_id = "question_session"
+        update = FakeUpdate(text="/ask what is variance?")
+        asyncio.run(bot.message(update, SimpleNamespace()))
+        assert [reply[0] for reply in update.message.replies] == [
+            "finalized previous question",
+            "chunk one for what is variance?",
+            "chunk two",
+        ]
+        assert sessions["telegram_123"].calls == ["finalize", "stream:what is variance?"]
 
 
 def test_buttons_map_to_existing_commands():

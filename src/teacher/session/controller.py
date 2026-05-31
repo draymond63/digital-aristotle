@@ -188,6 +188,10 @@ class LearningSession(QuestionContextMixin, SessionFinalizerMixin, TaskConversat
 
     def ask(self, question: str) -> str:
         """Answer a learner question inside the active question session."""
+        return "\n\n".join(self.stream_ask(question))
+
+    def stream_ask(self, question: str):
+        """Stream an answer inside the active question session."""
         if self.mode != "question" or not self.active_session_id:
             self._reset_conversation()
             self.mode = "question"
@@ -200,17 +204,16 @@ class LearningSession(QuestionContextMixin, SessionFinalizerMixin, TaskConversat
         self.teacher_context = context
         self.vector_db.log_ask(
             question,
-            session_id=abs(hash(self.active_session_id)) % (10**12),
-            user_id=self.user_id,
-        )
-        response = "\n\n".join(self._respond(question))
+                session_id=abs(hash(self.active_session_id)) % (10**12),
+                user_id=self.user_id,
+            )
+        yield from self._respond(question)
         conversation_path = self._write_conversation()
         if self.active_session_id:
             self.sql_db.save_learning_session_progress(
                 self.active_session_id,
                 conversation_path=conversation_path,
             )
-        return response
 
     def finalize(self) -> FinalizationReport:
         """Finalize the active session and persist durable updates."""

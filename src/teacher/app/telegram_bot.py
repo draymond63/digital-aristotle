@@ -200,19 +200,26 @@ class TelegramTutorBot:
                 if self._needs_onboarding(user_id):
                     await self._send_onboarding_intro(update, user_id)
                     reply = await asyncio.to_thread(self._route_onboarding_text, user_id, text)
+                    await self._reply(
+                        update,
+                        reply.text,
+                        include_keyboard=reply.include_keyboard,
+                        button_rows=reply.button_rows,
+                    )
                 else:
-                    reply = await asyncio.to_thread(self._route_reply, user_id, text)
+                    await self._handle_session_text(update, user_id, text)
+                    return
             except Exception:
                 logger.exception(f"Unhandled Telegram routing error for user {user_id}")
                 reply = TelegramReply(
                     "Something went wrong while I was thinking. I logged the error in the bot console."
                 )
-            await self._reply(
-                update,
-                reply.text,
-                include_keyboard=reply.include_keyboard,
-                button_rows=reply.button_rows,
-            )
+                await self._reply(
+                    update,
+                    reply.text,
+                    include_keyboard=reply.include_keyboard,
+                    button_rows=reply.button_rows,
+                )
 
     def _start_onboarding(self, telegram_id: int) -> TelegramReply:
         """Start or continue onboarding for a Telegram user."""
@@ -270,6 +277,63 @@ class TelegramTutorBot:
         """Route a normal-session reply and attach keyboard state."""
         response = self._route_text(telegram_id, text)
         return TelegramReply(response, button_rows=self._button_rows(telegram_id))
+
+    async def _handle_session_text(self, update: Update, telegram_id: int, text: str):
+        """Route normal-session text with streaming for teacher answers."""
+        text = text.strip()
+        session = self._get_session(telegram_id)
+        if not text:
+            return
+        if text == BUTTON_ASK:
+            self.pending_actions[telegram_id] = "ask"
+            await self._reply(update, "What's your question?", button_rows=self._button_rows(telegram_id))
+            return
+        if text in BUTTON_TO_COMMAND:
+            self.pending_actions.pop(telegram_id, None)
+            result = await asyncio.to_thread(session.handle, BUTTON_TO_COMMAND[text])
+            await self._reply(update, result.text, button_rows=self._button_rows(telegram_id))
+            return
+        if text.startswith("/"):
+            self.pending_actions.pop(telegram_id, None)
+            command, _, arg = text.partition(" ")
+            if command.lower() == "/ask" and arg.strip():
+                await self._stream_ask(update, session, arg.strip())
+                return
+            result = await asyncio.to_thread(session.handle, text)
+            await self._reply(update, result.text, button_rows=self._button_rows(telegram_id))
+            return
+
+        pending = self.pending_actions.pop(telegram_id, None)
+        await self._stream_ask(update, session, text, force_new_question=pending == "ask")
+
+    async def _stream_ask(
+        self,
+        update: Update,
+        session: LearningSession,
+        question: str,
+        force_new_question: bool = True,
+    ):
+        """Stream a learning-session answer to Telegram."""
+        if force_new_question and session.mode == "question" and session.active_session_id:
+            report = await asyncio.to_thread(lambda: session.finalize().render())
+            await self._reply(update, report, button_rows=self._button_rows(self._telegram_id(update)))
+        generator = session.stream_ask(question)
+        first = True
+        while True:
+            chunk = await asyncio.to_thread(self._next_stream_chunk, generator)
+            if chunk is None:
+                break
+            await self._reply(
+                update,
+                chunk,
+                button_rows=self._button_rows(self._telegram_id(update)) if first else None,
+            )
+            first = False
+
+    @staticmethod
+    def _next_stream_chunk(generator):
+        """Return the next stream chunk or None when exhausted."""
+        return next(generator, None)
 
     def _route_text(self, telegram_id: int, text: str) -> str:
         """Route text into buttons, commands, or learning-session text."""
