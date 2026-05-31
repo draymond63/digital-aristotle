@@ -103,7 +103,7 @@ TELEGRAM_ALLOWED_IDS=123456789,987654321
 Run it with:
 
 ```
-python src/teacher/app/telegram.py
+python src/teacher/app/telegram_bot.py
 ```
 
 Profiles are stored as `telegram_<telegram_user_id>`. Refused users are appended to

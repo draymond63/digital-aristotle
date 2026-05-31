@@ -9,7 +9,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 
-from teacher.app.telegram import (
+from teacher.app.telegram_bot import (
     BUTTON_ASK,
     BUTTON_DONE,
     BUTTON_HELP,
@@ -303,7 +303,7 @@ def test_app_can_be_constructed_from_fake_env_without_network():
         os.environ,
         {"TELEGRAM_KEY": "123:ABC", "TELEGRAM_ALLOWED_IDS": "123,456"},
         clear=True,
-    ), patch("teacher.app.telegram.dotenv.load_dotenv"):
+    ), patch("teacher.app.telegram_bot.dotenv.load_dotenv"):
         config = load_config()
         assert config.allowed_ids == {123, 456}
         bot = TelegramTutorBot(config, build_application=True)
