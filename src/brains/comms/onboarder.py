@@ -138,7 +138,7 @@ class OnboardingBrain(TaskConversation):
             yield "You are set up. Ask me anything when you are ready."
             return
 
-        self.add_usr_msg(user_message)
+        self.add_user_message(user_message)
 
         if self.current_dimension[0] == "curiosity_anchor" and self._is_uncertain_curiosity(user_message):
             self.helped_find_curiosity = True

@@ -640,6 +640,40 @@ def test_graph_updates_are_limited_before_persistence():
             os.chdir(old_cwd)
 
 
+def test_graph_response_normalizes_null_text_before_limiting():
+    result = GraphUpdatesResponse.model_validate(
+        {
+            "topics": [
+                {
+                    "topic_id": "empirical_risk_minimization",
+                    "name": "Empirical Risk Minimization",
+                    "description": "Risk minimization over training data.",
+                    "confidence": 0.95,
+                    "evidence": "Strong evidence.",
+                },
+                {
+                    "topic_id": "embeddings",
+                    "name": "Embeddings",
+                    "description": None,
+                    "confidence": 0.25,
+                    "evidence": "Weak evidence.",
+                },
+            ],
+            "edges": [
+                {
+                    "topic1": "embeddings",
+                    "topic2": "representation_learning",
+                    "relation_type": "application_of",
+                    "confidence": 0.25,
+                    "evidence": None,
+                }
+            ],
+        }
+    )
+    assert result.topics[1].description == ""
+    assert result.edges[0].evidence == ""
+
+
 if __name__ == "__main__":
     test_schema_is_idempotent()
     test_question_session_lifecycle_and_finalization()
@@ -659,4 +693,5 @@ if __name__ == "__main__":
     test_graph_finalizer_gets_existing_topic_candidates()
     test_graph_updates_skip_weak_invalid_and_self_edges()
     test_graph_updates_are_limited_before_persistence()
+    test_graph_response_normalizes_null_text_before_limiting()
     print("learning session tests passed")

@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from brains.comms.agent_base import ResponseObject
 
@@ -18,12 +18,22 @@ class TopicUpdateResponse(ResponseObject):
     confidence: float = 0.0
     evidence: str = ""
 
+    @field_validator("topic_id", "evidence", mode="before")
+    @classmethod
+    def none_to_empty_string(cls, value):
+        return "" if value is None else value
+
 
 class MemoryUpdateResponse(ResponseObject):
     type: str = "insight"
     topic_id: str = ""
     text: str = ""
     confidence: float = 0.0
+
+    @field_validator("type", "topic_id", "text", mode="before")
+    @classmethod
+    def none_to_empty_string(cls, value):
+        return "" if value is None else value
 
 
 class GraphTopicResponse(ResponseObject):
@@ -33,6 +43,11 @@ class GraphTopicResponse(ResponseObject):
     confidence: float = 0.0
     evidence: str = ""
 
+    @field_validator("topic_id", "name", "description", "evidence", mode="before")
+    @classmethod
+    def none_to_empty_string(cls, value):
+        return "" if value is None else value
+
 
 class GraphEdgeResponse(ResponseObject):
     topic1: str = ""
@@ -40,6 +55,11 @@ class GraphEdgeResponse(ResponseObject):
     relation_type: str = "related"
     confidence: float = 0.0
     evidence: str = ""
+
+    @field_validator("topic1", "topic2", "relation_type", "evidence", mode="before")
+    @classmethod
+    def none_to_empty_string(cls, value):
+        return "" if value is None else value
 
 
 class GraphUpdatesResponse(ResponseObject):
@@ -50,6 +70,11 @@ class GraphUpdatesResponse(ResponseObject):
 class SessionSummaryResponse(ResponseObject):
     summary: str = ""
     next_step: str = ""
+
+    @field_validator("summary", "next_step", mode="before")
+    @classmethod
+    def none_to_empty_string(cls, value):
+        return "" if value is None else value
 
 
 class SessionTopicUpdatesResponse(ResponseObject):
@@ -76,12 +101,22 @@ class ProfileUpdateGateResponse(ResponseObject):
     accept: bool = False
     reason: str = ""
 
+    @field_validator("reason", mode="before")
+    @classmethod
+    def none_to_empty_string(cls, value):
+        return "" if value is None else value
+
 
 class QuestionTopicResponse(ResponseObject):
     topic_id: str = ""
     name: str = ""
     description: str = ""
     confidence: float = 0.0
+
+    @field_validator("topic_id", "name", "description", mode="before")
+    @classmethod
+    def none_to_empty_string(cls, value):
+        return "" if value is None else value
 
 
 class QuestionTopicResolutionResponse(ResponseObject):
@@ -93,6 +128,11 @@ class TopicConnectionResponse(ResponseObject):
     relation_type: str = "none"
     confidence: float = 0.0
     evidence: str = ""
+
+    @field_validator("topic_id", "relation_type", "evidence", mode="before")
+    @classmethod
+    def none_to_empty_string(cls, value):
+        return "" if value is None else value
 
 
 class TopicGraphConnectionResponse(ResponseObject):

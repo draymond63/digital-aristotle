@@ -47,9 +47,9 @@ def test_first_curiosity_ignores_greetings_and_uncertainty():
 
 def test_first_curiosity_does_not_use_background_or_style_answers():
     brain = OnboardingBrain(username="test_onboarding_tasks")
-    brain.add_usr_msg("Hello")
-    brain.add_usr_msg("strong signal processing background")
-    brain.add_usr_msg("visual and intuitive, no long lectures")
+    brain.add_user_message("Hello")
+    brain.add_user_message("strong signal processing background")
+    brain.add_user_message("visual and intuitive, no long lectures")
     assert brain.first_curiosity_answer() is None
 
 

@@ -28,9 +28,6 @@ class TaskConversation:
     def add_user_message(self, user_message: str):
         self.convo.append_user(user_message)
 
-    def add_usr_msg(self, user_message: str):
-        self.add_user_message(user_message)
-
     def run_task_json(
         self,
         task: Task[ResponseT],

@@ -121,6 +121,7 @@ Rules:
 - Do not create plural, adjectival, or reworded variants of an existing topic ID.
 - Prefer empty lists over verbose graph expansion.
 - Include evidence for every durable update.
+- Use empty strings for unknown optional text. Do not return null values.
 - Use lowercase snake_case topic IDs.
 - Relation types must be one of: prerequisite, related, part_of, application_of, enables.
 - Return empty topic and edge lists if nothing durable should be added.
