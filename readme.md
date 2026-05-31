@@ -13,12 +13,7 @@ properties to understand their abilities.
 https://chatgpt.com/c/6a00ce1f-c71c-83ea-9d8a-86696484883c
 
 # TODO
-- Handle different users from telegram
-- User evaluation
-- Insight/confusion distillation
-- Topic edge creation
-- Telegram integration
-- Saving chats before they are finished
+?
 
 
 # Flow
@@ -108,7 +103,7 @@ TELEGRAM_ALLOWED_IDS=123456789,987654321
 Run it with:
 
 ```
-python src/interface/text_chat.py
+python src/teacher/app/telegram.py
 ```
 
 Profiles are stored as `telegram_<telegram_user_id>`. Refused users are appended to

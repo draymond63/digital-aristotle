@@ -2,7 +2,8 @@ from types import SimpleNamespace
 from unittest.mock import Mock, patch
 import os
 
-from brains.comms.agent_base import Agent, ResponseObject, Task, get_control_model, get_teacher_model
+from teacher.agent.providers import Agent, get_control_model, get_teacher_model
+from teacher.agent.types import ResponseObject, Task
 
 
 class ExampleResponse(ResponseObject):
@@ -18,8 +19,8 @@ def test_task_ollama_model_routes_to_ollama_client():
 
     with (
         patch.dict(os.environ, {}, clear=True),
-        patch("brains.comms.agent_base.dotenv.load_dotenv"),
-        patch("brains.comms.agent_base.Client", return_value=fake_client),
+        patch("teacher.agent.providers.dotenv.load_dotenv"),
+        patch("teacher.agent.providers.Client", return_value=fake_client),
     ):
         agent = Agent()
         task = Task("test", "You are concise.", model="qwen2.5:3b-instruct-q4_K_M")
@@ -47,8 +48,8 @@ def test_openai_model_routes_to_openai_client():
             },
             clear=True,
         ),
-        patch("brains.comms.agent_base.dotenv.load_dotenv"),
-        patch("brains.comms.agent_base.OpenAI", return_value=fake_client),
+        patch("teacher.agent.providers.dotenv.load_dotenv"),
+        patch("teacher.agent.providers.OpenAI", return_value=fake_client),
     ):
         agent = Agent()
         task = Task("test", "You are concise.", model="gpt-test")
@@ -70,8 +71,8 @@ def test_json_task_coerces_response_object():
 
     with (
         patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}, clear=True),
-        patch("brains.comms.agent_base.dotenv.load_dotenv"),
-        patch("brains.comms.agent_base.OpenAI", return_value=fake_client),
+        patch("teacher.agent.providers.dotenv.load_dotenv"),
+        patch("teacher.agent.providers.OpenAI", return_value=fake_client),
     ):
         agent = Agent()
         task = Task("test_json", "Return JSON.", model="gpt-test", output_format=ExampleResponse)
@@ -85,7 +86,7 @@ def test_json_task_coerces_response_object():
 def test_missing_task_model_fails():
     with (
         patch.dict(os.environ, {}, clear=True),
-        patch("brains.comms.agent_base.dotenv.load_dotenv"),
+        patch("teacher.agent.providers.dotenv.load_dotenv"),
     ):
         agent = Agent()
         try:
@@ -99,7 +100,7 @@ def test_missing_task_model_fails():
 def test_model_helpers_use_local_models_without_use_api():
     with (
         patch.dict(os.environ, {}, clear=True),
-        patch("brains.comms.agent_base.dotenv.load_dotenv"),
+        patch("teacher.agent.providers.dotenv.load_dotenv"),
     ):
         assert get_teacher_model() == "phi4-mini:3.8b-q4_K_M"
         assert get_control_model() == "qwen2.5:3b-instruct-q4_K_M"
@@ -108,7 +109,7 @@ def test_model_helpers_use_local_models_without_use_api():
 def test_model_helpers_use_api_model_when_use_api_is_present():
     with (
         patch.dict(os.environ, {"USE_API": "1"}, clear=True),
-        patch("brains.comms.agent_base.dotenv.load_dotenv"),
+        patch("teacher.agent.providers.dotenv.load_dotenv"),
     ):
         assert get_teacher_model() == "gpt-4.1-mini"
         assert get_control_model() == "gpt-4.1-mini"
@@ -130,9 +131,9 @@ def test_can_mix_task_providers():
 
     with (
         patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}, clear=True),
-        patch("brains.comms.agent_base.dotenv.load_dotenv"),
-        patch("brains.comms.agent_base.Client", return_value=fake_ollama_client),
-        patch("brains.comms.agent_base.OpenAI", return_value=fake_openai_client),
+        patch("teacher.agent.providers.dotenv.load_dotenv"),
+        patch("teacher.agent.providers.Client", return_value=fake_ollama_client),
+        patch("teacher.agent.providers.OpenAI", return_value=fake_openai_client),
     ):
         agent = Agent()
         local_task = Task("local", "You are concise.", model="qwen2.5:3b-instruct-q4_K_M")

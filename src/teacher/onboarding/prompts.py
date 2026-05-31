@@ -145,6 +145,7 @@ Rules:
 
 
 def ASSESSMENT_TRANSITION_PROMPT(topic: str, explanation: str):
+  """Build a profile assessment transition prompt."""
   return f"""Onboarding field: {topic}
 Purpose: learn {explanation}.
 Task: ask the user one concise question that collects this field for an exploratory-learning profile.
@@ -153,6 +154,7 @@ Do not answer for the user."""
 
 
 def SECTION_TRANSITION_PROMPT(topic: str, explanation: str, transcript: str):
+  """Build a packet for transitioning onboarding sections."""
   return f"""Completed field transcript:
 {transcript}
 

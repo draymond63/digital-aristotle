@@ -7,7 +7,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
-from brains.data.db_sql import SQLDatabase
+from teacher.persistence.sql import SQLDatabase
 
 
 DB_PATH = ROOT / "data" / "aristotle.db"
@@ -15,6 +15,7 @@ BACKUP_DIR = ROOT / "data" / "db_backups"
 
 
 def main() -> None:
+    """Back up and clean topic graph rows."""
     BACKUP_DIR.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     backup_path = BACKUP_DIR / f"aristotle-before-graph-cleanup-{stamp}.db"

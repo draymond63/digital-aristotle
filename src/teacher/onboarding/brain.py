@@ -1,5 +1,7 @@
-from brains.comms.agent_base import ResponseObject, Task, Conversation, get_control_model
-from brains.comms.prompts_onboarder import (
+from teacher.agent.conversation import Conversation
+from teacher.agent.providers import get_control_model
+from teacher.agent.types import ResponseObject, Task
+from teacher.onboarding.prompts import (
     ASSESSMENT_TRANSITION_PROMPT,
     ONBOARDING_COMPLETE_PROMPT,
     ONBOARDING_PROMPT,
@@ -8,13 +10,15 @@ from brains.comms.prompts_onboarder import (
     PROFILE_SEED_PROMPT,
     SECTION_TRANSITION_PROMPT,
 )
-from brains.comms.task_conversation import TaskConversation
-from brains.data.profile import Profile
-from brains.data.profile import normalize_identifier
+from teacher.agent.task_conversation import TaskConversation
+from teacher.persistence.profile import Profile
+from teacher.persistence.profile import normalize_identifier
 from pydantic import Field
 
 
 class ProfileExtractionResponse(ResponseObject):
+    """Represent one extracted onboarding profile signal."""
+
     field: str = ""
     confidence: float = 0.0
     value: str = ""
@@ -24,12 +28,16 @@ class ProfileExtractionResponse(ResponseObject):
 
 
 class ProfileSeedTopicResponse(ResponseObject):
+    """Represent initial mastery state for one seeded topic."""
+
     intuition: float = 0.0
     details: float = 0.0
     confidence: float = 0.0
 
 
 class ProfileSeedResponse(ResponseObject):
+    """Represent a compact onboarding profile seed."""
+
     background: dict[str, object] = Field(default_factory=dict)
     topics: dict[str, ProfileSeedTopicResponse] = Field(default_factory=dict)
     preferences: dict[str, list[str]] = Field(default_factory=dict)
@@ -38,6 +46,8 @@ class ProfileSeedResponse(ResponseObject):
 
 
 class OnboardingBrain(TaskConversation):
+    """Run the short onboarding conversation and profile seed extraction."""
+
     user_dimensions = {
         "curiosity_anchor": (
             "what the learner wants to explore first, or whether they need help finding a starting point."
@@ -68,6 +78,7 @@ class OnboardingBrain(TaskConversation):
     questions_per_dimension = 1
 
     def __init__(self, username: str = "daniel", messages=None):
+        """Initialize onboarding state and task contracts."""
         super().__init__(messages=messages)
         self.username = username
         self.profile_seed = None
@@ -125,15 +136,18 @@ class OnboardingBrain(TaskConversation):
 
     @property
     def current_dimension(self):
+        """Return the current onboarding dimension."""
         return self.dimensions_to_cover[self.field_index]
 
     def start(self):
+        """Start onboarding from the first dimension."""
         self.field_index = 0
         self.turns_in_field = 0
         self.field_start_index = len(self.convo)
         yield from self.ask_current_question()
 
     def respond(self, user_message: str):
+        """Advance onboarding with one user response."""
         if self.profile_seed is not None:
             yield "You are set up. Ask me anything when you are ready."
             return
@@ -167,10 +181,12 @@ class OnboardingBrain(TaskConversation):
         yield from self.ask_current_question()
 
     def ask_current_question(self):
+        """Ask the question for the current onboarding dimension."""
         dimension, _ = self.current_dimension
         yield from self._emit_onboarding_message(self.question_text[dimension])
 
     def evaluate_section(self):
+        """Extract profile signals from the current onboarding section."""
         result = self.run_task_json(
             self.evaluation_task,
             self.current_section(),
@@ -179,6 +195,7 @@ class OnboardingBrain(TaskConversation):
         return result
 
     def advance_field(self):
+        """Move to the next onboarding dimension or complete onboarding."""
         if self.field_index + 1 >= len(self.dimensions_to_cover):
             yield from self.complete_onboarding()
             return
@@ -189,9 +206,11 @@ class OnboardingBrain(TaskConversation):
         yield from self.ask_current_question()
 
     def transition_to_next_topic(self):
+        """Advance to the next onboarding topic."""
         yield from self.advance_field()
 
     def transition_to(self, topic: str, meaning: str):
+        """Transition to an explicit onboarding topic."""
         previous_section = self.current_section()
         self.turns_in_field = 0
         packet = self._transition_packet(previous_section, topic, meaning)
@@ -203,6 +222,7 @@ class OnboardingBrain(TaskConversation):
         )
 
     def complete_onboarding(self):
+        """Finish onboarding and emit the completion response."""
         self.prepopulate_profile()
         yield from self.stream_task(
             self.complete_task,
@@ -210,21 +230,26 @@ class OnboardingBrain(TaskConversation):
         )
 
     def current_section(self):
+        """Return visible messages for the current onboarding section."""
         return Conversation(list(self.convo)[self.field_start_index:]).visible_messages()
 
     def current_field_prompt(self):
+        """Return the assessment prompt for the current dimension."""
         dimension, meaning = self.current_dimension
         return ASSESSMENT_TRANSITION_PROMPT(dimension, meaning)
 
     def first_curiosity_answer(self) -> str | None:
+        """Return the learner's first real curiosity answer."""
         return self.curiosity_answer
 
     def _emit_onboarding_message(self, text: str):
+        """Append and yield one onboarding assistant message."""
         self.convo.append_task_result(self.ask_task, text)
         yield text
 
     @staticmethod
     def _is_uncertain_curiosity(user_message: str) -> bool:
+        """Return whether a curiosity answer expresses uncertainty."""
         normalized = normalize_identifier(user_message)
         uncertain_phrases = (
             "i_don_t_know",
@@ -241,6 +266,7 @@ class OnboardingBrain(TaskConversation):
 
     @classmethod
     def _looks_like_curiosity(cls, user_message: str) -> bool:
+        """Return whether a message looks like a real curiosity topic."""
         normalized = normalize_identifier(user_message)
         if not normalized or cls._is_uncertain_curiosity(user_message):
             return False
@@ -264,6 +290,7 @@ class OnboardingBrain(TaskConversation):
         return len(normalized) >= 8
 
     def prepopulate_profile(self):
+        """Generate and persist the initial profile seed."""
         seed = self.run_task_json(
             self.profile_seed_task,
             self.convo.visible_messages(),
@@ -272,6 +299,7 @@ class OnboardingBrain(TaskConversation):
         self.apply_profile_seed(seed)
 
     def apply_profile_seed(self, seed: ProfileSeedResponse):
+        """Apply a profile seed to durable profile YAML."""
         profile = Profile.load_user(self.username)
 
         for category, value in seed.background.items():
@@ -291,6 +319,7 @@ class OnboardingBrain(TaskConversation):
             profile.add_current_topic(topic_id)
 
     def _transition_packet(self, previous_section: Conversation, dimension: str, meaning: str):
+        """Build a transition packet from a previous section."""
         transcript = "\n".join(
             f"{message.role.upper()}: {message.content}"
             for message in previous_section

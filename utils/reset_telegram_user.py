@@ -11,7 +11,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
-from brains.data.profile import normalize_identifier
+from teacher.utils.identifiers import normalize_identifier
 
 
 logger = logging.getLogger(__name__)
@@ -48,19 +48,23 @@ USER_TABLE_PREDICATES = {
 
 
 def user_id_from_telegram_id(telegram_id: str) -> str:
+    """Convert a Telegram ID into a normalized user ID."""
     return normalize_identifier(f"telegram_{telegram_id}")
 
 
 def timestamp() -> str:
+    """Return a filesystem-safe timestamp."""
     return datetime.now().isoformat(timespec="seconds").replace(":", "-")
 
 
 def fetch_rows(conn: sqlite3.Connection, query: str, params: tuple = ()) -> list[dict]:
+    """Fetch SQLite rows as dictionaries."""
     conn.row_factory = sqlite3.Row
     return [dict(row) for row in conn.execute(query, params).fetchall()]
 
 
 def user_sql_snapshot(conn: sqlite3.Connection, user_id: str) -> dict[str, list[dict]]:
+    """Capture SQL rows associated with a user."""
     snapshot = {}
     for table in USER_SCOPED_TABLES:
         predicate = USER_TABLE_PREDICATES[table]
@@ -86,6 +90,7 @@ def user_sql_snapshot(conn: sqlite3.Connection, user_id: str) -> dict[str, list[
 
 
 def copy_if_exists(source: Path, backup_dir: Path):
+    """Copy an existing path into a backup directory."""
     if not source.exists():
         return
     try:
@@ -101,6 +106,7 @@ def copy_if_exists(source: Path, backup_dir: Path):
 
 
 def conversation_files(user_id: str) -> list[Path]:
+    """Return conversation files associated with a user."""
     conversation_dir = DATA_DIR / "conversations"
     if not conversation_dir.exists():
         return []
@@ -108,6 +114,7 @@ def conversation_files(user_id: str) -> list[Path]:
 
 
 def make_backup(user_id: str, conn: sqlite3.Connection) -> Path:
+    """Back up user SQL rows and runtime files."""
     backup_dir = BACKUP_ROOT / f"{user_id}-{timestamp()}"
     backup_dir.mkdir(parents=True, exist_ok=False)
 
@@ -125,6 +132,7 @@ def make_backup(user_id: str, conn: sqlite3.Connection) -> Path:
 
 
 def delete_sql_rows(conn: sqlite3.Connection, user_id: str) -> dict[str, int]:
+    """Delete SQL rows associated with a user."""
     deleted = {}
     goal_ids = [row["id"] for row in conn.execute("SELECT id FROM learning_goals WHERE user_id = ?", (user_id,))]
     if goal_ids:
@@ -149,6 +157,7 @@ def delete_sql_rows(conn: sqlite3.Connection, user_id: str) -> dict[str, int]:
 
 
 def delete_path(path: Path) -> bool:
+    """Delete one file or directory if present."""
     if not path.exists():
         return False
     if path.is_dir():
@@ -159,6 +168,7 @@ def delete_path(path: Path) -> bool:
 
 
 def delete_user_files(user_id: str) -> dict[str, int | bool]:
+    """Delete profile and conversation files for a user."""
     profile_deleted = delete_path(DATA_DIR / "profiles" / f"{user_id}.yaml")
     profile_backups_deleted = delete_path(DATA_DIR / "profile_backups" / user_id)
     conversations = conversation_files(user_id)
@@ -172,11 +182,12 @@ def delete_user_files(user_id: str) -> dict[str, int | bool]:
 
 
 def delete_traceable_chroma_entries(user_id: str, session_ids: list[str]) -> dict[str, int | str]:
+    """Delete vector entries traceable to a user or sessions."""
     if not CHROMA_PATH.exists():
         return {"deleted": 0, "note": "No Chroma directory."}
     try:
         from chromadb import PersistentClient
-        from brains.data.db_vector import Collection
+        from teacher.persistence.vector import Collection
     except Exception as exc:
         logger.exception(f"Could not import Chroma while resetting user {user_id}")
         return {"deleted": 0, "note": f"Could not import Chroma: {exc}"}
@@ -213,6 +224,7 @@ def delete_traceable_chroma_entries(user_id: str, session_ids: list[str]) -> dic
 
 
 def reset_user(telegram_id: str, dry_run: bool = False) -> dict:
+    """Reset one Telegram user's local data."""
     user_id = user_id_from_telegram_id(telegram_id)
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
@@ -245,6 +257,7 @@ def reset_user(telegram_id: str, dry_run: bool = False) -> dict:
 
 
 def main():
+    """Parse reset arguments and print a JSON report."""
     parser = argparse.ArgumentParser(
         description="Back up and delete local AI Teacher data for a Telegram user."
     )

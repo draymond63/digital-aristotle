@@ -1,171 +1,48 @@
+from __future__ import annotations
+
 import json
 import os
+from typing import Generator, Literal
+
 import dotenv
-from dataclasses import asdict, dataclass, field
-from typing import Any, Generator, Generic, Literal, TypeVar, get_args
 from ollama import Client
 from openai import OpenAI
-from pydantic import BaseModel, ConfigDict
+
+from teacher.agent.conversation import Conversation
+from teacher.agent.types import ResponseT, Task
 
 
-RoleType = Literal["user", "system", "assistant"]
-ROLES = get_args(RoleType)
-ContextFormat = Literal["messages", "transcript", "packet"]
 ProviderType = Literal["ollama", "openai"]
 OPENAI_MODEL_PREFIXES = ("gpt-", "o1", "o3", "o4", "chatgpt-")
 LOCAL_TEACHER_MODEL = "phi4-mini:3.8b-q4_K_M"
 LOCAL_CONTROL_MODEL = "qwen2.5:3b-instruct-q4_K_M"
 API_TEACHER_MODEL = "gpt-4.1-mini"
-ResponseT = TypeVar("ResponseT", bound="ResponseObject")
-
-
-class ResponseObject(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-    def json_data(self):
-        return self.model_dump(mode="json")
-
-
-@dataclass(frozen=True)
-class Task(Generic[ResponseT]):
-    name: str
-    static_prompt: str
-    model: str | None = None
-    context_format: ContextFormat = "messages"
-    visible_history: int | None = None
-    dynamic_after_context: bool = False
-    output_format: type[ResponseT] | None = None
-    # Model parameters
-    temperature: float = 0.5
-    num_ctx: int = 4096
-    num_predict: int = 1000
-    top_p: float = 0.85
-    repeat_penalty: float = 1.12
-
-
-@dataclass
-class LogEntry:
-    role: RoleType
-    content: str
-    task_name: str | None = None
-    visible: bool = True
-    dynamic_prompts: list[str] = field(default_factory=list)
-    input_messages: list[dict[str, str]] = field(default_factory=list)
-
-    @property
-    def source(self) -> str:
-        return self.task_name or self.role
-
-    def json(self, full=False):
-        if not full and not self.task_name and self.visible and not self.dynamic_prompts and not self.input_messages:
-            return {"content": self.content, "source": self.role}
-        return asdict(self)
-
-    def to_api(self):
-        return {"role": self.role, "content": self.content}
-
-
-class Conversation:
-    def __init__(self, entries: list[LogEntry] | None = None):
-        entries = entries or []
-        assert isinstance(entries, list), f"Expected list[LogEntry], received {type(entries)}"
-        self._entries = entries
-
-    def save(self, filename: str):
-        os.makedirs("data/conversations", exist_ok=True)
-        with open(f"data/conversations/{filename}.json", "w+", encoding="utf-8") as f:
-            json.dump(self.json(full=True), f)
-
-    @classmethod
-    def load(cls, filepath: str):
-        with open(filepath, "r", encoding="utf-8") as f:
-            entries = json.load(f)
-        return Conversation([cls._load_entry(entry) for entry in entries])
-
-    @staticmethod
-    def _load_entry(entry: dict):
-        if "role" in entry:
-            return LogEntry(**entry)
-        source = entry["source"]
-        role = source if source in ROLES else "system"
-        task_name = None if source in ROLES else source
-        visible = source in ("user", "assistant")
-        return LogEntry(role=role, content=entry["content"], task_name=task_name, visible=visible)
-
-    def append_user(self, content: str):
-        self.append_entry(LogEntry(role="user", content=content))
-
-    def append_task_result(
-        self,
-        task: Task,
-        content: str,
-        role: RoleType = "assistant",
-        visible: bool = True,
-        dynamic_prompts: list[str] | None = None,
-        input_messages: list[dict[str, str]] | None = None,
-    ):
-        self.append_entry(LogEntry(
-            role=role,
-            content=content,
-            task_name=task.name,
-            visible=visible,
-            dynamic_prompts=dynamic_prompts or [],
-            input_messages=input_messages or [],
-        ))
-
-    def append_entry(self, entry: LogEntry):
-        self._entries.append(entry)
-
-    def copy(self):
-        return Conversation(self._entries.copy())
-
-    def json(self, full=False):
-        return [m.json(full=full) for m in self._entries]
-    
-    def to_api(self):
-        return [m.to_api() for m in self._entries]
-
-    def visible_messages(self):
-        return Conversation([
-            entry for entry in self._entries
-            if entry.visible and entry.role in ("user", "assistant")
-        ])
-
-    def tail(self, count: int | None):
-        if count is None:
-            return self.copy()
-        return Conversation(self._entries[-count:])
-    
-    def __len__(self):
-        return len(self._entries)
-    
-    def __iter__(self):
-        yield from self._entries
-
-    def __getitem__(self, key):
-        if isinstance(key, int):
-            return self._entries[key]
-        return Conversation(self._entries[key])
 
 
 class Agent:
+    """Run text and structured tasks against configured model providers."""
+
     def __init__(self):
+        """Load environment configuration and initialize provider cache."""
         dotenv.load_dotenv()
         self.clients = {}
 
     @staticmethod
     def _provider_for_model(model: str) -> ProviderType:
+        """Choose a provider from a model name."""
         if model.startswith(OPENAI_MODEL_PREFIXES):
             return "openai"
         return "ollama"
 
     def _client_for_provider(self, provider: ProviderType):
+        """Return a cached provider client."""
         if provider not in self.clients:
             self.clients[provider] = self._build_client(provider)
         return self.clients[provider]
 
     @staticmethod
     def _build_client(provider: ProviderType):
+        """Build a provider client."""
         if provider == "ollama":
             return Client()
         if not os.getenv("OPENAI_API_KEY"):
@@ -179,6 +56,7 @@ class Agent:
         dynamic_prompts: list[str] | None = None,
         packet: str | None = None,
     ) -> str:
+        """Run a task and return text content."""
         response = self._generate_task(task, conversation, dynamic_prompts, packet)
         return self._message_content(response)
 
@@ -189,6 +67,7 @@ class Agent:
         dynamic_prompts: list[str] | None = None,
         packet: str | None = None,
     ) -> ResponseT:
+        """Run a structured task and validate the JSON response."""
         if task.output_format is None:
             raise ValueError(f"Task {task.name} does not define a response object")
         response = self._generate_task(task, conversation, dynamic_prompts, packet, format="json")
@@ -204,6 +83,7 @@ class Agent:
         dynamic_prompts: list[str] | None = None,
         packet: str | None = None,
     ):
+        """Stream a task response as paragraph chunks."""
         responses = self._generate_task(task, conversation, dynamic_prompts, packet, stream=True)
         for content in self._chunk_responses(responses):
             yield content
@@ -215,6 +95,7 @@ class Agent:
         dynamic_prompts: list[str] | None = None,
         packet: str | None = None,
     ) -> list[dict[str, str]]:
+        """Build provider messages for a task."""
         conversation = conversation or Conversation()
         dynamic_prompts = dynamic_prompts or []
         messages = [{"role": "system", "content": task.static_prompt}]
@@ -229,6 +110,7 @@ class Agent:
         return messages
 
     def _generate_task(self, task: Task, conversation: Conversation | None = None, dynamic_prompts=None, packet=None, **kwargs):
+        """Generate a provider response for a task."""
         conversation = conversation or Conversation()
         messages = self.build_task_messages(task, conversation, dynamic_prompts, packet)
         return self._generate(
@@ -243,6 +125,7 @@ class Agent:
         )
 
     def _format_task_context(self, task: Task, conversation: Conversation, packet: str | None):
+        """Format task context according to the task contract."""
         visible_context = conversation.visible_messages().tail(task.visible_history)
         if task.context_format == "messages":
             return visible_context.to_api()
@@ -255,6 +138,7 @@ class Agent:
 
     @staticmethod
     def _build_transcript(conversation: Conversation):
+        """Build a plain transcript from visible conversation entries."""
         transcript = "BEGIN TRANSCRIPT\n"
         for message in conversation:
             transcript += f"{message.role.upper()}: {message.content}\n\n"
@@ -272,6 +156,7 @@ class Agent:
         repeat_penalty=1.12,
         **kwargs,
     ):
+        """Generate a raw provider response."""
         if model is None:
             raise ValueError("Task model must be specified")
         provider = self._provider_for_model(model)
@@ -311,6 +196,7 @@ class Agent:
         format: str | None = None,
         **kwargs,
     ):
+        """Generate a raw OpenAI chat completion response."""
         kwargs.pop("options", None)
         request = {
             "model": model,
@@ -330,12 +216,14 @@ class Agent:
 
     @staticmethod
     def _message_content(response) -> str:
+        """Extract message text from Ollama or OpenAI responses."""
         if hasattr(response, "message"):
             return response.message.content
         return response.choices[0].message.content or ""
 
     @staticmethod
     def _chunk_content(chunk) -> str:
+        """Extract chunk text from Ollama or OpenAI streams."""
         if hasattr(chunk, "message"):
             return chunk.message.content
         if not chunk.choices:
@@ -344,6 +232,7 @@ class Agent:
 
     @staticmethod
     def _chunk_responses(response: Generator, chunk_on="\n\n") -> Generator[str, None, None]:
+        """Yield buffered stream chunks split on paragraph breaks."""
         buffer = ""
         for chunk in response:
             content = Agent._chunk_content(chunk)
@@ -361,6 +250,7 @@ class Agent:
 
 
 def get_teacher_model():
+    """Return the configured teacher model name."""
     dotenv.load_dotenv()
     if os.getenv("USE_API") is not None:
         return API_TEACHER_MODEL
@@ -368,6 +258,7 @@ def get_teacher_model():
 
 
 def get_control_model():
+    """Return the configured control model name."""
     dotenv.load_dotenv()
     if os.getenv("USE_API") is not None:
         return API_TEACHER_MODEL

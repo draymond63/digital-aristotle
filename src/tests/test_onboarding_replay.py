@@ -2,8 +2,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 
-from brains.comms.agent_base import Conversation
-from brains.comms.onboarder import OnboardingBrain
+from teacher.agent.conversation import Conversation
+from teacher.onboarding.brain import OnboardingBrain
 
 
 def load_until_state_change(filepath: Path) -> tuple[Conversation, str, str]:

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-from brains.data.db_sql import SQLDatabase
-from brains.data.profile import Profile
-from brains.session_types import LearnerTopicAssumption, LearnerTopicKnown, QuestionPlan
+from teacher.persistence.sql import SQLDatabase
+from teacher.persistence.profile import Profile
+from teacher.session.types import LearnerTopicAssumption, LearnerTopicKnown, QuestionPlan
 
 
 class QuestionPlanner:
+    """Build temporary teaching plans from graph and profile state."""
+
     BOTTLENECK_RELATIONS = {"prerequisite", "enables"}
     INTENT_GUIDANCE = {
         "explain_mechanism": (
@@ -31,10 +33,12 @@ class QuestionPlanner:
     }
 
     def __init__(self, sql_db: SQLDatabase, profile: Profile):
+        """Initialize planner dependencies."""
         self.sql_db = sql_db
         self.profile = profile
 
     def build(self, target_topics: list[str], profile_topic_hints: list[str], intent: str = "explain_mechanism") -> QuestionPlan:
+        """Build a question plan for target topics and intent."""
         intent = self._normalize_intent(intent)
         connected_profile_topics = self.sql_db.connected_targets(target_topics, profile_topic_hints, max_hops=2)
         direct_known_topics = [
@@ -70,6 +74,7 @@ class QuestionPlanner:
         )
 
     def _known_from_profile(self, topic_id: str) -> LearnerTopicKnown:
+        """Build a known-topic object from profile state."""
         resolved = self.sql_db.resolve_topic_id(topic_id)
         state = self.profile.topics[resolved]
         return LearnerTopicKnown(
@@ -81,6 +86,7 @@ class QuestionPlanner:
 
     @staticmethod
     def _assumption_from_known(topic: LearnerTopicKnown) -> LearnerTopicAssumption:
+        """Convert a known topic into a temporary assumption."""
         score = (topic.intuition + topic.details + topic.confidence) / 3
         if score >= 0.65:
             status = "safe_to_assume"
@@ -96,6 +102,7 @@ class QuestionPlanner:
         )
 
     def _gap_assumptions(self, target_topics: list[str], intent: str) -> list[LearnerTopicAssumption]:
+        """Infer temporary assumptions from nearby graph gaps."""
         target_set = {self.sql_db.resolve_topic_id(topic_id) for topic_id in target_topics}
         assumptions = []
         for edge in self.sql_db.neighboring_topic_edges(target_topics):
@@ -120,10 +127,12 @@ class QuestionPlanner:
         return assumptions[:4]
 
     def _normalize_intent(self, intent: str) -> str:
+        """Normalize question intent to a supported value."""
         intent = str(intent or "").strip().lower().replace("-", "_").replace(" ", "_")
         return intent if intent in self.INTENT_GUIDANCE else "explain_mechanism"
 
     def _rank_anchors(self, target_topics: list[str], knowns: list[LearnerTopicKnown]) -> list[str]:
+        """Rank known topics as teaching anchors."""
         target_set = {self.sql_db.resolve_topic_id(topic_id) for topic_id in target_topics}
         strong_or_likely_targets = [
             topic.topic_id
@@ -135,6 +144,7 @@ class QuestionPlanner:
 
     @staticmethod
     def _dedupe_topics(topic_ids: list[str]) -> list[str]:
+        """Dedupe topic IDs while preserving order."""
         deduped = []
         for topic_id in topic_ids:
             if topic_id and topic_id not in deduped:
@@ -142,6 +152,7 @@ class QuestionPlanner:
         return deduped
 
     def _matching_profile_topic(self, topic_id: str) -> str:
+        """Find a profile topic matching a graph topic."""
         resolved = self.sql_db.resolve_topic_id(topic_id)
         if resolved in self.profile.topics:
             return resolved
@@ -156,6 +167,7 @@ class QuestionPlanner:
 
     @staticmethod
     def _entry_point(intent: str, target_topics: list[str], anchors: list[str], bottlenecks: list[str]) -> str:
+        """Choose the recommended teaching entry point."""
         target_id = target_topics[0] if target_topics else ""
         target = target_id.replace("_", " ") if target_id else "the learner's question"
         anchor = ""
@@ -185,14 +197,17 @@ class QuestionPlanner:
 
     @staticmethod
     def _topic_score(topic: LearnerTopicKnown) -> float:
+        """Return the average topic mastery score."""
         return (topic.intuition + topic.details + topic.confidence) / 3
 
     @staticmethod
     def _topic_tokens(topic_id: str) -> list[str]:
+        """Split a topic ID into non-empty tokens."""
         return [item for item in topic_id.split("_") if item]
 
     @staticmethod
     def _tokens_contain(container: list[str], contained: list[str]) -> bool:
+        """Return whether one token sequence contains another."""
         if len(contained) > len(container):
             return False
         for index in range(len(container) - len(contained) + 1):

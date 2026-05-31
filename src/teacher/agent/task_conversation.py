@@ -5,7 +5,9 @@ import json
 import logging
 from typing import TypeVar
 
-from brains.comms.agent_base import Agent, Conversation, ResponseObject, Task
+from teacher.agent.conversation import Conversation
+from teacher.agent.providers import Agent
+from teacher.agent.types import ResponseObject, Task
 
 
 ResponseT = TypeVar("ResponseT", bound=ResponseObject)
@@ -13,19 +15,25 @@ logger = logging.getLogger(__name__)
 
 
 class TaskConversation:
+    """Provide shared task execution and conversation logging helpers."""
+
     def __init__(self, agent: Agent | None = None, messages=None):
+        """Initialize with an agent and optional seed messages."""
         self.agent = agent or Agent()
         self.convo = Conversation(messages)
 
     @property
     def conversation(self) -> Conversation:
+        """Return the active conversation."""
         return self.convo
 
     @conversation.setter
     def conversation(self, value: Conversation):
+        """Replace the active conversation."""
         self.convo = value
 
     def add_user_message(self, user_message: str):
+        """Append a visible user message to the active conversation."""
         self.convo.append_user(user_message)
 
     def run_task_json(
@@ -39,6 +47,7 @@ class TaskConversation:
         default: ResponseT | None = None,
         error_message: str | None = None,
     ) -> ResponseT | None:
+        """Run a structured task and append its validated result."""
         conversation = conversation or self.convo
         log_conversation = log_conversation or conversation
         dynamic_prompts = dynamic_prompts or []
@@ -68,6 +77,7 @@ class TaskConversation:
         packet: str | None = None,
         visible: bool = True,
     ):
+        """Stream a task and append its complete response."""
         conversation = conversation or self.convo
         log_conversation = log_conversation or conversation
         dynamic_prompts = dynamic_prompts or []
@@ -86,20 +96,15 @@ class TaskConversation:
             )
 
     def save(self):
+        """Persist the current conversation under a timestamp filename."""
         filename = datetime.now().isoformat(timespec="seconds").replace(":", "-")
         self.convo.save(filename)
 
     @property
     def num_messages(self):
+        """Return the number of active conversation messages."""
         return len(self.convo)
 
     def set_convo(self, convo: Conversation):
+        """Replace the active conversation object."""
         self.convo = convo
-
-    def chat_local(self):
-        while True:
-            message = input("\nUser: ")
-            if message == "":
-                break
-            list(self.respond(message))
-        self.save()

@@ -3,6 +3,8 @@ from hashlib import sha1
 
 
 class Collection(StrEnum):
+    """Name vector collections used by the tutor."""
+
     INSIGHTS = "insights"
     CONFUSIONS = "confusions"
     PARTIAL_UNDERSTANDINGS = "partial_understandings"
@@ -12,6 +14,8 @@ class Collection(StrEnum):
 
 
 class MemoryKind(StrEnum):
+    """Map extracted memory kinds to vector collections."""
+
     INSIGHT = "insights"
     CONFUSION = "confusions"
     PARTIAL_UNDERSTANDING = "partial_understandings"
@@ -20,24 +24,31 @@ class MemoryKind(StrEnum):
 
     @property
     def memory_type(self) -> str:
+        """Return the singular prompt-facing memory type."""
         return self.value.removesuffix("s")
 
     @property
     def collection(self) -> Collection:
+        """Return the vector collection for this memory kind."""
         return Collection(self.value)
 
     @classmethod
     def vector_collections(cls) -> tuple[Collection, ...]:
+        """Return all semantic memory vector collections."""
         return tuple(kind.collection for kind in cls)
 
 
 class SemanticDatabase:
+    """Wrap Chroma collections used for semantic retrieval."""
+
     def __init__(self, path: str = "data/chroma"):
+        """Open the persistent Chroma client."""
         from chromadb import PersistentClient
 
         self.client = PersistentClient(path=path)
 
     def log_ask(self, msg: str, session_id: int, user_id: str | None = None):
+        """Persist a learner question for later similarity search."""
         ask_id = sha1(f"{user_id or ''}:{session_id}:{msg}".encode("utf-8")).hexdigest()[:16]
         self.add(
             collection_name=Collection.PREVIOUS_ASKS,
@@ -47,6 +58,7 @@ class SemanticDatabase:
         )
 
     def find_asks(self, query: str, max_dist=0.5, user_id: str | None = None) -> list[str]:
+        """Find previous questions similar to a query."""
         response = self.query(
             collection_name=Collection.PREVIOUS_ASKS,
             query_texts=[query],
@@ -63,6 +75,7 @@ class SemanticDatabase:
         documents: list[str],
         metadatas: list[dict] | None = None,
     ):
+        """Upsert documents into a vector collection."""
         collection = self.collection(collection_name)
         kwargs = {"ids": ids, "documents": documents}
         if metadatas is not None:
@@ -70,6 +83,7 @@ class SemanticDatabase:
         collection.upsert(**kwargs)
 
     def ids_for_metadata(self, collection_name: Collection, **metadata_filter) -> list[str]:
+        """Find vector IDs whose metadata matches all filters."""
         collection = self.collection(collection_name)
         ids = []
         if "user_id" in metadata_filter:
@@ -82,11 +96,13 @@ class SemanticDatabase:
         return ids
 
     def delete_ids(self, collection_name: Collection, ids: list[str]):
+        """Delete vector rows by ID."""
         if not ids:
             return
         self.collection(collection_name).delete(ids=ids)
 
     def query_pretty(self, *args, max_dist=0.8, user_id: str | None = None, **kwargs):
+        """Query and format deduped results for prompt context."""
         if user_id:
             kwargs["user_id"] = user_id
         response = self.query(*args, **kwargs)
@@ -105,6 +121,7 @@ class SemanticDatabase:
         return "\n".join(pretty)
 
     def query(self, collection_name: Collection, query_texts: list[str], user_id: str | None = None, **kwargs):
+        """Query one vector collection."""
         collection = self.collection(collection_name)
         if user_id:
             kwargs["where"] = self._user_where(user_id)
@@ -112,10 +129,12 @@ class SemanticDatabase:
         return results
 
     def collection(self, collection_name: Collection):
+        """Return or create a Chroma collection."""
         return self.client.get_or_create_collection(name=collection_name.value)
 
     @staticmethod
     def _metadata(user_id: str | None = None, **kwargs):
+        """Build Chroma metadata with optional user ID."""
         metadata = {key: value for key, value in kwargs.items() if value is not None}
         if user_id:
             metadata["user_id"] = user_id
@@ -123,28 +142,5 @@ class SemanticDatabase:
 
     @staticmethod
     def _user_where(user_id: str):
+        """Build a Chroma where clause for user filtering."""
         return {"user_id": {"$eq": user_id}}
-
-
-def example():
-    """Example related to inductance and spin"""
-    db = SemanticDatabase()
-    db.add(
-        collection_name=Collection.INSIGHTS,
-        ids=["1", "2"],
-        documents=[
-            "Inductance is the property of an electrical conductor by which a change in current flowing through it induces an electromotive force (voltage) in both the conductor itself and in any nearby conductors.",
-            "Spin is a fundamental property of particles, akin to charge and mass, that describes their intrinsic angular momentum."
-        ]
-    )
-    db.add(
-        collection_name=Collection.PREVIOUS_ASKS,
-        ids=["3"],
-        documents=["Why is inductance important in electrical circuits?"]
-    )
-    return db
-
-if __name__ == "__main__":
-    db = example()
-    r = db.find_asks("What is inductance?")
-    print(r)

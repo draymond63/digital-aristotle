@@ -21,8 +21,8 @@ from telegram.ext import (
 )
 
 
-from brains.comms.onboarder import OnboardingBrain
-from brains.session import LearningSession
+from teacher.onboarding.brain import OnboardingBrain
+from teacher.session.controller import LearningSession
 
 
 logger = logging.getLogger(__name__)
@@ -50,6 +50,8 @@ COMMANDS = (
 
 @dataclass
 class TelegramConfig:
+    """Hold Telegram runtime configuration."""
+
     token: str
     allowed_ids: set[int]
     attempted_usage_path: Path = ATTEMPT_LOG_PATH
@@ -57,18 +59,22 @@ class TelegramConfig:
 
 @dataclass
 class TelegramReply:
+    """Describe a Telegram reply and keyboard state."""
+
     text: str
     include_keyboard: bool = True
     button_rows: list[list[str]] | None = None
 
 
 def parse_allowed_ids(value: str | None) -> set[int]:
+    """Parse comma-separated Telegram user IDs."""
     if not value:
         return set()
     return {int(part.strip()) for part in value.split(",") if part.strip()}
 
 
 def load_config() -> TelegramConfig:
+    """Load Telegram bot configuration from the environment."""
     dotenv.load_dotenv()
     token = os.getenv("TELEGRAM_KEY")
     allowed_ids = parse_allowed_ids(os.getenv("TELEGRAM_ALLOWED_IDS"))
@@ -80,10 +86,12 @@ def load_config() -> TelegramConfig:
 
 
 def telegram_user_id(user_id: int) -> str:
+    """Convert a Telegram numeric ID to a profile ID."""
     return f"telegram_{user_id}"
 
 
 def keyboard_markup(button_rows: list[list[str]] | None = None) -> ReplyKeyboardMarkup:
+    """Build the persistent Telegram reply keyboard."""
     return ReplyKeyboardMarkup(
         button_rows or [[BUTTON_ASK], [BUTTON_PROFILE, BUTTON_HELP]],
         resize_keyboard=True,
@@ -92,6 +100,7 @@ def keyboard_markup(button_rows: list[list[str]] | None = None) -> ReplyKeyboard
 
 
 def split_telegram_text(text: str, limit: int = MAX_TELEGRAM_MESSAGE_CHARS) -> list[str]:
+    """Split long Telegram replies under the message limit."""
     if not text:
         return []
     chunks = []
@@ -110,6 +119,8 @@ def split_telegram_text(text: str, limit: int = MAX_TELEGRAM_MESSAGE_CHARS) -> l
 
 
 class TelegramTutorBot:
+    """Route Telegram messages into onboarding and learning sessions."""
+
     def __init__(
         self,
         config: TelegramConfig,
@@ -118,6 +129,7 @@ class TelegramTutorBot:
         profile_exists: Callable[[str], bool] | None = None,
         build_application: bool = True,
     ):
+        """Initialize bot dependencies and optional Telegram application."""
         self.config = config
         self.session_factory = session_factory or (lambda user_id: LearningSession(user_id=user_id))
         self.onboarding_factory = onboarding_factory or (lambda user_id: OnboardingBrain(username=user_id))
@@ -127,7 +139,6 @@ class TelegramTutorBot:
         self.onboarded_users: set[int] = set()
         self.onboarding_intro_sent: set[int] = set()
         self.pending_actions: dict[int, str] = {}
-        self.last_one_off_questions: dict[int, str] = {}
         self.locks: dict[int, asyncio.Lock] = {}
         self.app: Application | None = None
         if build_application:
@@ -135,9 +146,11 @@ class TelegramTutorBot:
 
     @classmethod
     def from_env(cls, build_application: bool = True) -> "TelegramTutorBot":
+        """Create a bot from environment configuration."""
         return cls(load_config(), build_application=build_application)
 
     def _build_application(self) -> Application:
+        """Build the python-telegram-bot application."""
         app = ApplicationBuilder().token(self.config.token).build()
         app.add_handler(CommandHandler("start", self.start))
         app.add_handler(CommandHandler(COMMANDS, self.command))
@@ -145,11 +158,13 @@ class TelegramTutorBot:
         return app
 
     def run(self):
+        """Run the Telegram polling loop."""
         if not self.app:
             self.app = self._build_application()
         self.app.run_polling()
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle Telegram /start."""
         if not await self._guard_allowed(update):
             return
         user_id = self._telegram_id(update)
@@ -163,18 +178,21 @@ class TelegramTutorBot:
         await self._reply(update, session.startup_message(), include_keyboard=True, button_rows=button_rows)
 
     async def command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle Telegram slash commands."""
         if not await self._guard_allowed(update):
             return
         text = update.message.text if update.message else ""
         await self._handle_allowed_text(update, text)
 
     async def message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle regular Telegram text messages."""
         if not await self._guard_allowed(update):
             return
         text = update.message.text if update.message else ""
         await self._handle_allowed_text(update, text)
 
     async def _handle_allowed_text(self, update: Update, text: str):
+        """Route already-authorized text with a per-user lock."""
         user_id = self._telegram_id(update)
         lock = self.locks.setdefault(user_id, asyncio.Lock())
         async with lock:
@@ -197,6 +215,7 @@ class TelegramTutorBot:
             )
 
     def _start_onboarding(self, telegram_id: int) -> TelegramReply:
+        """Start or continue onboarding for a Telegram user."""
         if telegram_id in self.onboarding:
             return TelegramReply("Let's finish getting you set up first.", include_keyboard=False)
         brain = self._get_onboarding(telegram_id)
@@ -204,6 +223,7 @@ class TelegramTutorBot:
         return TelegramReply(response, include_keyboard=False)
 
     async def _send_onboarding_intro(self, update: Update, telegram_id: int):
+        """Send the onboarding intro once per user."""
         if telegram_id in self.onboarding_intro_sent:
             return
         self.onboarding_intro_sent.add(telegram_id)
@@ -214,6 +234,7 @@ class TelegramTutorBot:
         )
 
     def _route_onboarding_text(self, telegram_id: int, text: str) -> TelegramReply:
+        """Route text while the user is in onboarding."""
         text = text.strip()
         if not text or text == "/start":
             return self._start_onboarding(telegram_id)
@@ -226,7 +247,6 @@ class TelegramTutorBot:
             self.onboarded_users.add(telegram_id)
             session = self._get_session(telegram_id)
             if first_question:
-                self.last_one_off_questions[telegram_id] = first_question
                 first_answer = session.handle(f"/ask {first_question}").text
                 return TelegramReply(
                     f"{response}\n\nLet's start with that as a quick question.\n\n"
@@ -247,10 +267,12 @@ class TelegramTutorBot:
         return TelegramReply(response, include_keyboard=False)
 
     def _route_reply(self, telegram_id: int, text: str) -> TelegramReply:
+        """Route a normal-session reply and attach keyboard state."""
         response = self._route_text(telegram_id, text)
         return TelegramReply(response, button_rows=self._button_rows(telegram_id))
 
     def _route_text(self, telegram_id: int, text: str) -> str:
+        """Route text into buttons, commands, or learning-session text."""
         text = text.strip()
         session = self._get_session(telegram_id)
         if not text:
@@ -263,17 +285,15 @@ class TelegramTutorBot:
             return session.handle(BUTTON_TO_COMMAND[text]).text
         if text.startswith("/"):
             self.pending_actions.pop(telegram_id, None)
-            self._remember_one_off_command(telegram_id, text)
             return session.handle(text).text
 
         pending = self.pending_actions.pop(telegram_id, None)
         if pending == "ask":
-            self.last_one_off_questions[telegram_id] = text
             return session.handle(f"/ask {text}").text
-        self.last_one_off_questions[telegram_id] = text
         return session.handle(text).text
 
     def _button_rows(self, telegram_id: int) -> list[list[str]]:
+        """Return keyboard rows for a user's current state."""
         rows = []
         rows.append([BUTTON_ASK])
 
@@ -285,25 +305,24 @@ class TelegramTutorBot:
         return rows
 
     def _has_active_session(self, telegram_id: int) -> bool:
+        """Return whether a Telegram user has an active session."""
         session = self.sessions.get(telegram_id)
         return bool(session and session.active_session_id)
 
     def _get_session(self, telegram_id: int) -> LearningSession:
+        """Return the cached learning session for a Telegram user."""
         if telegram_id not in self.sessions:
             self.sessions[telegram_id] = self.session_factory(telegram_user_id(telegram_id))
         return self.sessions[telegram_id]
 
-    def _remember_one_off_command(self, telegram_id: int, text: str):
-        command, _, arg = text.partition(" ")
-        if command.lower() == "/ask" and arg.strip():
-            self.last_one_off_questions[telegram_id] = arg.strip()
-
     def _get_onboarding(self, telegram_id: int) -> OnboardingBrain:
+        """Return the cached onboarding brain for a Telegram user."""
         if telegram_id not in self.onboarding:
             self.onboarding[telegram_id] = self.onboarding_factory(telegram_user_id(telegram_id))
         return self.onboarding[telegram_id]
 
     def _needs_onboarding(self, telegram_id: int) -> bool:
+        """Return whether a Telegram user must complete onboarding."""
         user_id = telegram_user_id(telegram_id)
         return (
             telegram_id in self.onboarding
@@ -311,13 +330,16 @@ class TelegramTutorBot:
         )
 
     def _onboarding_complete(self, telegram_id: int, brain: OnboardingBrain) -> bool:
+        """Return whether onboarding has produced or loaded a profile."""
         return brain.profile_seed is not None or self.profile_exists(telegram_user_id(telegram_id))
 
     @staticmethod
     def _profile_exists(user_id: str) -> bool:
+        """Return whether a profile exists for a user."""
         return Path(f"data/profiles/{user_id}.yaml").exists()
 
     async def _guard_allowed(self, update: Update) -> bool:
+        """Reject Telegram users outside the allowlist."""
         user_id = self._telegram_id(update)
         if user_id in self.config.allowed_ids:
             return True
@@ -326,6 +348,7 @@ class TelegramTutorBot:
         return False
 
     def _log_refused_attempt(self, update: Update):
+        """Append a refused Telegram usage attempt to JSONL."""
         user = update.effective_user
         message = update.message
         record = {
@@ -344,12 +367,14 @@ class TelegramTutorBot:
 
     @staticmethod
     def _command_name(text: str | None) -> str | None:
+        """Extract a Telegram command name from message text."""
         if not text or not text.startswith("/"):
             return None
         return text.split(maxsplit=1)[0][1:].split("@", maxsplit=1)[0]
 
     @staticmethod
     def _telegram_id(update: Update) -> int:
+        """Return the effective Telegram user ID."""
         if not update.effective_user:
             raise RuntimeError("Telegram update has no effective user.")
         return int(update.effective_user.id)
@@ -361,6 +386,7 @@ class TelegramTutorBot:
         include_keyboard: bool = True,
         button_rows: list[list[str]] | None = None,
     ):
+        """Send a possibly chunked Telegram reply."""
         if not update.message:
             return
         chunks = split_telegram_text(text)

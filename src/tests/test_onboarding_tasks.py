@@ -1,5 +1,5 @@
-from brains.comms.onboarder import OnboardingBrain
-from brains.comms.prompts_onboarder import PROFILE_EXTRACTION_PROMPT
+from teacher.onboarding.brain import OnboardingBrain
+from teacher.onboarding.prompts import PROFILE_EXTRACTION_PROMPT
 
 
 def test_onboarding_json_tasks_have_room_for_valid_json():

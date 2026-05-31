@@ -1,4 +1,4 @@
-from brains.data.db_vector import Collection, SemanticDatabase
+from teacher.persistence.vector import Collection, SemanticDatabase
 
 
 class FakeCollection:

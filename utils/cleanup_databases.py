@@ -36,10 +36,12 @@ USER_TABLE_PREDICATES = {
 
 
 def timestamp() -> str:
+    """Return a filesystem-safe timestamp."""
     return datetime.now().isoformat(timespec="seconds").replace(":", "-")
 
 
 def ensure_under_data(path: Path) -> Path:
+    """Ensure a path resolves under the runtime data directory."""
     resolved = path.resolve()
     data_root = DATA_DIR.resolve()
     if resolved != data_root and data_root not in resolved.parents:
@@ -48,6 +50,7 @@ def ensure_under_data(path: Path) -> Path:
 
 
 def copy_if_exists(source: Path, target_root: Path):
+    """Copy an existing file or directory into a backup root."""
     if not source.exists():
         return
     target = target_root / source.relative_to(ROOT)
@@ -59,6 +62,7 @@ def copy_if_exists(source: Path, target_root: Path):
 
 
 def make_backup() -> Path:
+    """Create a backup of local database artifacts."""
     backup_dir = BACKUP_ROOT / f"database-cleanup-{timestamp()}"
     backup_dir.mkdir(parents=True, exist_ok=False)
     copy_if_exists(DB_PATH, backup_dir)
@@ -69,6 +73,7 @@ def make_backup() -> Path:
 
 
 def table_exists(conn: sqlite3.Connection, table: str) -> bool:
+    """Return whether a SQLite table exists."""
     row = conn.execute(
         "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?",
         (table,),
@@ -77,6 +82,7 @@ def table_exists(conn: sqlite3.Connection, table: str) -> bool:
 
 
 def delete_probe_sql(conn: sqlite3.Connection) -> dict[str, int]:
+    """Delete known probe-user SQL rows."""
     deleted: dict[str, int] = {}
     deleted_goal_ids = [
         row["id"]
@@ -139,6 +145,7 @@ def delete_probe_sql(conn: sqlite3.Connection) -> dict[str, int]:
 
 
 def delete_legacy_sql(conn: sqlite3.Connection) -> dict[str, int]:
+    """Delete legacy SQL rows outside the current session model."""
     deleted = {}
     if table_exists(conn, "events"):
         before = conn.total_changes
@@ -157,6 +164,7 @@ def delete_legacy_sql(conn: sqlite3.Connection) -> dict[str, int]:
 
 
 def prune_orphan_graph(conn: sqlite3.Connection) -> dict[str, int]:
+    """Remove graph rows with invalid or weak structure."""
     deleted = {}
     if table_exists(conn, "topic_edges"):
         before = conn.total_changes
@@ -188,6 +196,7 @@ def prune_orphan_graph(conn: sqlite3.Connection) -> dict[str, int]:
 
 
 def cleanup_sql(dry_run: bool) -> dict:
+    """Clean SQL data with optional rollback."""
     if not DB_PATH.exists():
         return {"note": "No SQLite database found."}
     conn = sqlite3.connect(DB_PATH)
@@ -217,6 +226,7 @@ def cleanup_sql(dry_run: bool) -> dict:
 
 
 def cleanup_chroma(dry_run: bool) -> dict:
+    """Clean Chroma vector rows for probe users."""
     if not CHROMA_PATH.exists():
         return {"note": "No Chroma database found."}
     from chromadb import PersistentClient
@@ -254,6 +264,7 @@ def cleanup_chroma(dry_run: bool) -> dict:
 
 
 def delete_path(path: Path) -> bool:
+    """Delete a file or directory if it exists."""
     resolved = ensure_under_data(path)
     if not resolved.exists():
         return False
@@ -265,6 +276,7 @@ def delete_path(path: Path) -> bool:
 
 
 def cleanup_files(dry_run: bool) -> dict:
+    """Clean runtime files for known probe users."""
     targets: list[Path] = []
     profiles = DATA_DIR / "profiles"
     if profiles.exists():
@@ -290,6 +302,7 @@ def cleanup_files(dry_run: bool) -> dict:
 
 
 def main():
+    """Parse cleanup arguments and print a JSON report."""
     parser = argparse.ArgumentParser(description="Back up and remove known-useless local AI Teacher database data.")
     parser.add_argument("--dry-run", action="store_true", help="Report cleanup targets without deleting them.")
     args = parser.parse_args()

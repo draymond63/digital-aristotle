@@ -5,8 +5,8 @@ from typing import Literal
 
 from pydantic import Field, field_validator, model_validator
 
-from brains.comms.agent_base import ResponseObject
-from brains.data.db_vector import MemoryKind
+from teacher.agent.types import ResponseObject
+from teacher.persistence.vector import MemoryKind
 
 
 SessionMode = Literal["idle", "question"]
@@ -21,12 +21,14 @@ QUESTION_INTENTS = {
 
 @dataclass(frozen=True)
 class LearnerTopicKnown:
+    """Represent a known learner topic from the durable profile."""
     topic_id: str
     intuition: float
     details: float
     confidence: float
 
     def render(self) -> str:
+        """Render the known topic for prompt context."""
         readable = self.topic_id.replace("_", " ")
         return (
             f"{readable}: intuition {self.intuition:.2f}, "
@@ -36,18 +38,21 @@ class LearnerTopicKnown:
 
 @dataclass(frozen=True)
 class LearnerTopicAssumption:
+    """Represent a temporary assumption for question planning."""
     topic_id: str
     status: str
     reason: str
     confidence: float
 
     def render(self) -> str:
+        """Render the assumption for prompt context."""
         readable = self.topic_id.replace("_", " ")
         return f"{readable}: {self.status} ({self.confidence:.2f}) - {self.reason}"
 
 
 @dataclass(frozen=True)
 class QuestionPlan:
+    """Describe the temporary plan for answering a learner question."""
     intent: str = "explain_mechanism"
     target_topics: list[str] = field(default_factory=list)
     knowns: list[LearnerTopicKnown] = field(default_factory=list)
@@ -60,9 +65,11 @@ class QuestionPlan:
 
     @property
     def needs_probe(self) -> bool:
+        """Return whether the plan should probe an assumption."""
         return any(item.status == "needs_probe" for item in self.assumptions)
 
     def render(self) -> str:
+        """Render the question plan for the teacher prompt."""
         lines = ["Question plan:"]
         lines.append(f"Intent: {self.intent}")
         lines.append(f"Target topics: {self._render_topics(self.target_topics)}")
@@ -82,17 +89,20 @@ class QuestionPlan:
 
     @staticmethod
     def _render_topics(topics: list[str]) -> str:
+        """Render topic IDs as readable text."""
         if not topics:
             return "none"
         return ", ".join(topic.replace("_", " ") for topic in topics)
 
     @staticmethod
     def _render_items(items) -> list[str]:
+        """Render non-empty lines as bullet items."""
         rendered = [item for item in items if item]
         return [f"- {item}" for item in rendered] if rendered else ["- none"]
 
 
 class TopicUpdateResponse(ResponseObject):
+    """Represent an extracted durable profile topic update."""
     topic_id: str = ""
     intuition: float = 0.0
     details: float = 0.0
@@ -102,10 +112,12 @@ class TopicUpdateResponse(ResponseObject):
     @field_validator("topic_id", "evidence", mode="before")
     @classmethod
     def none_to_empty_string(cls, value):
+        """Coerce null text fields to empty strings."""
         return "" if value is None else value
 
 
 class ExtractedMemory(ResponseObject):
+    """Represent one extracted semantic memory."""
     kind: MemoryKind = MemoryKind.INSIGHT
     topic_id: str = ""
     text: str = ""
@@ -114,6 +126,7 @@ class ExtractedMemory(ResponseObject):
     @model_validator(mode="before")
     @classmethod
     def accept_type_alias(cls, data):
+        """Accept legacy type fields as memory kind."""
         if isinstance(data, dict) and "type" in data and "kind" not in data:
             data = dict(data)
             data["kind"] = data.pop("type")
@@ -122,6 +135,7 @@ class ExtractedMemory(ResponseObject):
     @field_validator("kind", mode="before")
     @classmethod
     def type_to_kind(cls, value):
+        """Coerce prompt memory type strings into memory kinds."""
         if isinstance(value, MemoryKind):
             return value
         if value == "partial_understanding":
@@ -133,9 +147,11 @@ class ExtractedMemory(ResponseObject):
 
     @property
     def type(self) -> str:
+        """Return the prompt-facing memory type."""
         return self.kind.memory_type
 
     def json_data(self):
+        """Serialize memory using type instead of kind."""
         data = super().json_data()
         data["type"] = self.kind.memory_type
         del data["kind"]
@@ -144,13 +160,12 @@ class ExtractedMemory(ResponseObject):
     @field_validator("topic_id", "text", mode="before")
     @classmethod
     def none_to_empty_string(cls, value):
+        """Coerce null text fields to empty strings."""
         return "" if value is None else value
 
 
-MemoryUpdateResponse = ExtractedMemory
-
-
 class MemoryBucketItemResponse(ResponseObject):
+    """Represent one memory item inside a prompt bucket."""
     topic_id: str = ""
     text: str = ""
     confidence: float = 0.0
@@ -158,10 +173,12 @@ class MemoryBucketItemResponse(ResponseObject):
     @field_validator("topic_id", "text", mode="before")
     @classmethod
     def none_to_empty_string(cls, value):
+        """Coerce null text fields to empty strings."""
         return "" if value is None else value
 
 
 class GraphTopicResponse(ResponseObject):
+    """Represent one extracted topic graph node update."""
     topic_id: str = ""
     name: str = ""
     description: str = ""
@@ -171,10 +188,12 @@ class GraphTopicResponse(ResponseObject):
     @field_validator("topic_id", "name", "description", "evidence", mode="before")
     @classmethod
     def none_to_empty_string(cls, value):
+        """Coerce null text fields to empty strings."""
         return "" if value is None else value
 
 
 class GraphEdgeResponse(ResponseObject):
+    """Represent one extracted topic graph edge update."""
     topic1: str = ""
     topic2: str = ""
     relation_type: str = "related"
@@ -184,29 +203,37 @@ class GraphEdgeResponse(ResponseObject):
     @field_validator("topic1", "topic2", "relation_type", "evidence", mode="before")
     @classmethod
     def none_to_empty_string(cls, value):
+        """Coerce null text fields to empty strings."""
         return "" if value is None else value
 
 
 class GraphUpdatesResponse(ResponseObject):
+    """Group extracted topic graph updates."""
+
     topics: list[GraphTopicResponse] = Field(default_factory=list)
     edges: list[GraphEdgeResponse] = Field(default_factory=list)
 
 
 class SessionSummaryResponse(ResponseObject):
+    """Represent extracted session summary text."""
     summary: str = ""
     next_step: str = ""
 
     @field_validator("summary", "next_step", mode="before")
     @classmethod
     def none_to_empty_string(cls, value):
+        """Coerce null text fields to empty strings."""
         return "" if value is None else value
 
 
 class SessionTopicUpdatesResponse(ResponseObject):
+    """Group extracted profile topic updates."""
+
     topic_updates: list[TopicUpdateResponse] = Field(default_factory=list)
 
 
 class SessionMemoryExtractionResponse(ResponseObject):
+    """Group bucketed semantic memory extraction results."""
     confusions: list[MemoryBucketItemResponse] = Field(default_factory=list)
     partial_understandings: list[MemoryBucketItemResponse] = Field(default_factory=list)
     successful_explanations: list[MemoryBucketItemResponse] = Field(default_factory=list)
@@ -218,6 +245,7 @@ class SessionMemoryExtractionResponse(ResponseObject):
         memory_type: MemoryKind,
         memories: list[MemoryBucketItemResponse],
     ) -> list[ExtractedMemory]:
+        """Convert one prompt bucket into typed memories."""
         return [
             ExtractedMemory(
                 kind=memory_type,
@@ -229,6 +257,7 @@ class SessionMemoryExtractionResponse(ResponseObject):
         ]
 
     def extracted_memories(self) -> list[ExtractedMemory]:
+        """Flatten bucketed memories into typed memory objects."""
         return [
             *self._typed_memories(MemoryKind.CONFUSION, self.confusions),
             *self._typed_memories(MemoryKind.PARTIAL_UNDERSTANDING, self.partial_understandings),
@@ -239,10 +268,14 @@ class SessionMemoryExtractionResponse(ResponseObject):
 
 
 class SessionGraphUpdatesResponse(ResponseObject):
+    """Wrap graph updates from the finalizer prompt."""
+
     graph_updates: GraphUpdatesResponse = Field(default_factory=GraphUpdatesResponse)
 
 
 class SessionFinalizationResponse(ResponseObject):
+    """Represent all durable updates from finalization."""
+
     summary: str = ""
     next_step: str = ""
     topic_updates: list[TopicUpdateResponse] = Field(default_factory=list)
@@ -251,16 +284,19 @@ class SessionFinalizationResponse(ResponseObject):
 
 
 class ProfileUpdateGateResponse(ResponseObject):
+    """Represent model judgment on a proposed profile update."""
     accept: bool = False
     reason: str = ""
 
     @field_validator("reason", mode="before")
     @classmethod
     def none_to_empty_string(cls, value):
+        """Coerce null reasons to empty strings."""
         return "" if value is None else value
 
 
 class QuestionTopicResponse(ResponseObject):
+    """Represent one resolved question topic candidate."""
     topic_id: str = ""
     name: str = ""
     description: str = ""
@@ -269,22 +305,26 @@ class QuestionTopicResponse(ResponseObject):
     @field_validator("topic_id", "name", "description", mode="before")
     @classmethod
     def none_to_empty_string(cls, value):
+        """Coerce null text fields to empty strings."""
         return "" if value is None else value
 
 
 class QuestionTopicResolutionResponse(ResponseObject):
+    """Represent resolved question intent and topic candidates."""
     intent: str = "explain_mechanism"
     topics: list[QuestionTopicResponse] = Field(default_factory=list)
 
     @field_validator("intent", mode="before")
     @classmethod
     def normalize_intent(cls, value):
+        """Normalize unknown intents to the default intent."""
         intent = "" if value is None else str(value).strip().lower()
         intent = intent.replace("-", "_").replace(" ", "_")
         return intent if intent in QUESTION_INTENTS else "explain_mechanism"
 
 
 class TopicConnectionResponse(ResponseObject):
+    """Represent a candidate connection to an existing graph topic."""
     topic_id: str = ""
     relation_type: str = "none"
     confidence: float = 0.0
@@ -293,21 +333,27 @@ class TopicConnectionResponse(ResponseObject):
     @field_validator("topic_id", "relation_type", "evidence", mode="before")
     @classmethod
     def none_to_empty_string(cls, value):
+        """Coerce null text fields to empty strings."""
         return "" if value is None else value
 
 
 class TopicGraphConnectionResponse(ResponseObject):
+    """Group candidate graph connections for a topic."""
+
     connections: list[TopicConnectionResponse] = Field(default_factory=list)
 
 
 @dataclass
 class CommandResult:
+    """Represent a user-visible command result."""
+
     text: str
     should_quit: bool = False
 
 
 @dataclass
 class FinalizationReport:
+    """Represent the user-visible completion report."""
     summary: str
     next_step: str
     conversation_path: str
@@ -319,6 +365,7 @@ class FinalizationReport:
     graph_changes: int = 0
 
     def render(self) -> str:
+        """Render the finalization report for the user."""
         lines = [
             "Done. I saved this learning session.",
             "",

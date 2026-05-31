@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from brains.comms.onboarder import OnboardingBrain
+from teacher.onboarding.brain import OnboardingBrain
 
 
 CONVERSATION_NAME = "onboarding-feel-test"

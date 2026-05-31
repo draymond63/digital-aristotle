@@ -2,22 +2,24 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import os
 
-from brains.data.db_sql import SQLDatabase
-from brains.data.profile import Profile
-from brains.comms.prompts_session import (
+from teacher.persistence.sql import SQLDatabase
+from teacher.persistence.memory_store import SemanticMemoryStore
+from teacher.persistence.profile import Profile
+from teacher.persistence.vector import Collection
+from teacher.session.prompts import (
     PROFILE_UPDATE_GATE_PROMPT,
     QUESTION_TOPIC_RESOLUTION_PROMPT,
     SESSION_MEMORY_EXTRACTION_PROMPT,
     SESSION_TOPIC_UPDATES_PROMPT,
     TOPIC_GRAPH_CONNECTION_PROMPT,
 )
-from brains.question_planner import QuestionPlanner
-from brains.session import LearningSession
-from brains.session_types import (
+from teacher.teaching.question_planner import QuestionPlanner
+from teacher.session.controller import LearningSession
+from teacher.session.types import (
     GraphEdgeResponse,
     GraphTopicResponse,
     GraphUpdatesResponse,
-    MemoryUpdateResponse,
+    ExtractedMemory,
     QuestionPlan,
     SessionMemoryExtractionResponse,
     TopicUpdateResponse,
@@ -44,6 +46,14 @@ class FakeVectorDB:
 
     def add(self, collection_name, ids, documents, metadatas=None):
         self.added.append((collection_name, ids, documents, metadatas))
+
+    def delete_ids(self, collection_name, ids):
+        pass
+
+
+class FailingVectorDB(FakeVectorDB):
+    def add(self, collection_name, ids, documents, metadatas=None):
+        raise RuntimeError("vector unavailable")
 
 
 class FakeAgent:
@@ -259,6 +269,42 @@ def test_semantic_memories_can_be_marked_replaced():
         assert db.mark_semantic_memories_replaced("tester", session_id) == 1
         assert db.live_semantic_memory_ids("tester", session_id) == []
         db.close()
+
+
+def test_semantic_memory_vector_failure_leaves_no_live_sql_row():
+    with TemporaryDirectory() as dirname:
+        db = SQLDatabase(Path(dirname) / "data" / "test.db")
+        session_id = db.create_learning_session("tester", "question")
+        store = SemanticMemoryStore(db, FailingVectorDB())
+        saved = store.save_session_memories(
+            "tester",
+            session_id,
+            [
+                ExtractedMemory(
+                    type="insight",
+                    topic_id="confidence_interval",
+                    text="Learner understands coverage.",
+                    confidence=0.8,
+                )
+            ],
+        )
+        assert saved == 0
+        assert db.live_semantic_memory_ids("tester", session_id, Collection.INSIGHTS.value) == []
+        db.close()
+
+
+def test_question_context_builder_does_not_mutate_profile_topics():
+    with TemporaryDirectory() as dirname:
+        old_cwd = Path.cwd()
+        try:
+            session = make_session(Path(dirname))
+            before = session.profile.to_dict()
+            context = session._build_question_context("what is covariance?")
+            assert "Question plan:" in context
+            assert session.profile.to_dict() == before
+            session.sql_db.close()
+        finally:
+            os.chdir(old_cwd)
 
 
 def test_question_session_lifecycle_and_finalization():
@@ -972,12 +1018,12 @@ def test_memory_updates_are_deduped_before_persistence():
             session = make_session(Path(dirname))
             limited = session._dedupe_memories(
                 [
-                    MemoryUpdateResponse(type="insight", topic_id="topic_1", confidence=0.1, text="Weak."),
-                    MemoryUpdateResponse(type="insight", topic_id="topic_2", confidence=0.9, text="Strong."),
-                    MemoryUpdateResponse(type="confusion", topic_id="topic_3", confidence=0.7, text="Open."),
-                    MemoryUpdateResponse(type="learning_preference", topic_id="topic_4", confidence=0.8, text="Style."),
-                    MemoryUpdateResponse(type="successful_explanation", topic_id="topic_5", confidence=0.6, text="Move."),
-                    MemoryUpdateResponse(type="insight", topic_id="topic_2", confidence=1.0, text="Duplicate."),
+                    ExtractedMemory(type="insight", topic_id="topic_1", confidence=0.1, text="Weak."),
+                    ExtractedMemory(type="insight", topic_id="topic_2", confidence=0.9, text="Strong."),
+                    ExtractedMemory(type="confusion", topic_id="topic_3", confidence=0.7, text="Open."),
+                    ExtractedMemory(type="learning_preference", topic_id="topic_4", confidence=0.8, text="Style."),
+                    ExtractedMemory(type="successful_explanation", topic_id="topic_5", confidence=0.6, text="Move."),
+                    ExtractedMemory(type="insight", topic_id="topic_2", confidence=1.0, text="Duplicate."),
                 ]
             )
             assert [(memory.kind.memory_type, memory.topic_id) for memory in limited] == [
@@ -1083,6 +1129,8 @@ if __name__ == "__main__":
     test_schema_is_idempotent()
     test_find_learning_session_by_conversation_path()
     test_semantic_memories_can_be_marked_replaced()
+    test_semantic_memory_vector_failure_leaves_no_live_sql_row()
+    test_question_context_builder_does_not_mutate_profile_topics()
     test_question_session_lifecycle_and_finalization()
     test_bare_message_starts_question_session()
     test_question_context_steers_away_from_generic_overview()
