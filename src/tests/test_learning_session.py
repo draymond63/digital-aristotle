@@ -1,5 +1,6 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
+import json
 import os
 
 from teacher.persistence.sql import SQLDatabase
@@ -250,6 +251,23 @@ def test_find_learning_session_by_conversation_path():
         db.finish_learning_session(session_id, conversation_path="data/conversations/example.json")
         assert db.find_learning_session_by_conversation("tester", "data/conversations/example.json") == session_id
         assert db.find_learning_session_by_conversation("other", "data/conversations/example.json") is None
+        db.close()
+
+
+def test_find_active_learning_session():
+    with TemporaryDirectory() as dirname:
+        db = SQLDatabase(Path(dirname) / "data" / "test.db")
+        abandoned_id = db.create_learning_session("tester", "question")
+        db.finish_learning_session(abandoned_id, status="abandoned")
+        active_id = db.create_learning_session("tester", "question", metadata={"question": "what is covariance?"})
+        db.save_learning_session_progress(active_id, "data/conversations/example.json")
+
+        row = db.find_active_learning_session("tester")
+
+        assert row["id"] == active_id
+        assert row["conversation_path"] == "data/conversations/example.json"
+        assert "covariance" in row["metadata_json"]
+        assert db.find_active_learning_session("other") is None
         db.close()
 
 
@@ -711,6 +729,61 @@ def test_question_followups_share_open_session():
             assert row["status"] == "active"
             assert row["conversation_path"]
             session.sql_db.close()
+        finally:
+            os.chdir(old_cwd)
+
+
+def test_stream_ask_saves_user_message_before_teacher_finishes():
+    with TemporaryDirectory() as dirname:
+        old_cwd = Path.cwd()
+        try:
+            session = make_session(Path(dirname))
+            stream = session.stream_ask("what is covariance?")
+
+            first_chunk = next(stream)
+
+            assert first_chunk == "A Kalman filter alternates prediction and correction."
+            session.sql_db.cursor.execute(
+                "SELECT conversation_path FROM learning_sessions WHERE id = ?",
+                (session.active_session_id,),
+            )
+            row = session.sql_db.cursor.fetchone()
+            saved_entries = json.loads(Path(row["conversation_path"]).read_text(encoding="utf-8"))
+            assert saved_entries[-1]["role"] == "user"
+            assert saved_entries[-1]["content"] == "what is covariance?"
+            assert all(entry.get("role") != "assistant" for entry in saved_entries)
+            stream.close()
+            session.sql_db.close()
+        finally:
+            os.chdir(old_cwd)
+
+
+def test_resume_active_question_restores_session_id_and_conversation():
+    with TemporaryDirectory() as dirname:
+        old_cwd = Path.cwd()
+        try:
+            session = make_session(Path(dirname))
+            session.handle("/ask what is covariance?")
+            active_session_id = session.active_session_id
+            db = session.sql_db
+
+            restored = LearningSession(
+                user_id="tester",
+                sql_db=db,
+                vector_db=FakeVectorDB(),
+                profile=session.profile,
+                agent=FakeAgent(),
+                abandon_active=False,
+            )
+
+            assert restored.resume_active_question() is True
+            assert restored.mode == "question"
+            assert restored.active_session_id == active_session_id
+            assert [entry.content for entry in restored.conversation.visible_messages()] == [
+                "what is covariance?",
+                "A Kalman filter alternates prediction and correction.",
+            ]
+            db.close()
         finally:
             os.chdir(old_cwd)
 

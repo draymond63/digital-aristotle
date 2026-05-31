@@ -64,6 +64,21 @@ class LearningSessionStore:
         )
         self.conn.commit()
 
+    def find_active_learning_session(self, user_id: str, session_type: str = "question") -> dict | None:
+        """Find the newest active learning session for a user."""
+        self.cursor.execute(
+            """
+            SELECT id, user_id, session_type, status, conversation_path, metadata_json
+            FROM learning_sessions
+            WHERE user_id = ? AND session_type = ? AND status = 'active'
+            ORDER BY started_at DESC
+            LIMIT 1
+            """,
+            (user_id, session_type),
+        )
+        row = self.cursor.fetchone()
+        return dict(row) if row else None
+
     def find_learning_session_by_conversation(self, user_id: str, conversation_path: str) -> str | None:
         """Find the learning session associated with a conversation path."""
         self.cursor.execute(

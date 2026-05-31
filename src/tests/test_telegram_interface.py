@@ -31,6 +31,7 @@ class FakeSession:
         self.calls = []
         self.mode = "idle"
         self.active_session_id = None
+        self.resumed = False
 
     def startup_message(self):
         return f"startup for {self.user_id}"
@@ -57,6 +58,10 @@ class FakeSession:
         self.mode = "idle"
         self.active_session_id = None
         return SimpleNamespace(render=lambda: "finalized previous question")
+
+    def resume_active_question(self):
+        self.resumed = True
+        return False
 
 
 class FakeOnboarding:
@@ -146,6 +151,7 @@ def test_start_initializes_user_session_and_keyboard():
         update = FakeUpdate(text="/start")
         asyncio.run(bot.start(update, SimpleNamespace()))
         assert "telegram_123" in sessions
+        assert sessions["telegram_123"].resumed is True
         assert update.message.replies[0][0] == "startup for telegram_123"
         assert update.message.replies[0][1] is not None
         assert keyboard_text(update.message.replies[0][1]) == (

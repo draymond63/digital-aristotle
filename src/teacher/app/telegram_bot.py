@@ -131,7 +131,7 @@ class TelegramTutorBot:
     ):
         """Initialize bot dependencies and optional Telegram application."""
         self.config = config
-        self.session_factory = session_factory or (lambda user_id: LearningSession(user_id=user_id))
+        self.session_factory = session_factory or (lambda user_id: LearningSession(user_id=user_id, abandon_active=False))
         self.onboarding_factory = onboarding_factory or (lambda user_id: OnboardingBrain(username=user_id))
         self.profile_exists = profile_exists or self._profile_exists
         self.sessions: dict[int, LearningSession] = {}
@@ -376,7 +376,9 @@ class TelegramTutorBot:
     def _get_session(self, telegram_id: int) -> LearningSession:
         """Return the cached learning session for a Telegram user."""
         if telegram_id not in self.sessions:
-            self.sessions[telegram_id] = self.session_factory(telegram_user_id(telegram_id))
+            session = self.session_factory(telegram_user_id(telegram_id))
+            session.resume_active_question()
+            self.sessions[telegram_id] = session
         return self.sessions[telegram_id]
 
     def _get_onboarding(self, telegram_id: int) -> OnboardingBrain:

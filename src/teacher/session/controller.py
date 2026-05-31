@@ -207,13 +207,27 @@ class LearningSession(QuestionContextMixin, SessionFinalizerMixin, TaskConversat
                 session_id=abs(hash(self.active_session_id)) % (10**12),
                 user_id=self.user_id,
             )
-        yield from self._respond(question)
-        conversation_path = self._write_conversation()
-        if self.active_session_id:
-            self.sql_db.save_learning_session_progress(
-                self.active_session_id,
-                conversation_path=conversation_path,
-            )
+        self.conversation.append_user(question)
+        self._save_active_progress()
+        dynamic_prompts = [self.teacher_context] if self.teacher_context else []
+        yield from self.stream_task(self.teacher_task, self.conversation, dynamic_prompts=dynamic_prompts)
+        self._save_active_progress()
+
+    def resume_active_question(self) -> bool:
+        """Reload the newest active question session for this learner."""
+        row = self.sql_db.find_active_learning_session(self.user_id, "question")
+        if not row:
+            return False
+        self.mode = "question"
+        self.active_session_id = row["id"]
+        self.active_topic_id = None
+        self.teacher_context = ""
+        conversation_path = row.get("conversation_path")
+        if conversation_path and Path(conversation_path).exists():
+            self.conversation = Conversation.load(conversation_path)
+        else:
+            self._reset_conversation()
+        return True
 
     def finalize(self) -> FinalizationReport:
         """Finalize the active session and persist durable updates."""
@@ -273,6 +287,13 @@ class LearningSession(QuestionContextMixin, SessionFinalizerMixin, TaskConversat
             self.sql_db.save_learning_session_progress(self.active_session_id, path)
         return path
 
+    def _save_active_progress(self) -> str:
+        """Persist the current active-session conversation path."""
+        path = self._write_conversation()
+        if self.active_session_id:
+            self.sql_db.save_learning_session_progress(self.active_session_id, path)
+        return path
+
     def _write_conversation(self) -> str:
         """Write the active conversation to the runtime data directory."""
         filename = f"{self.user_id}-{datetime.now().isoformat(timespec='seconds').replace(':', '-')}"
@@ -321,10 +342,4 @@ class LearningSession(QuestionContextMixin, SessionFinalizerMixin, TaskConversat
         """Reset conversation state for a new question session."""
         self.conversation = Conversation()
         self.teacher_context = ""
-
-    def _respond(self, user_message: str):
-        """Stream the teacher response for a user message."""
-        self.conversation.append_user(user_message)
-        dynamic_prompts = [self.teacher_context] if self.teacher_context else []
-        yield from self.stream_task(self.teacher_task, self.conversation, dynamic_prompts=dynamic_prompts)
 
