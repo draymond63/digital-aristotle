@@ -175,7 +175,7 @@ QUESTION_TOPIC_RESOLUTION_PROMPT = """You resolve a learner's current question i
 
 Input:
 - the current user question
-- the learner profile and known topic graph candidates as system context
+- recent visible conversation context, the learner profile, and known topic graph candidates as system context
 
 Return strict JSON only:
 
@@ -204,6 +204,7 @@ Rules:
 - Do not reuse an existing topic because it shares generic words with the question.
 - For example, historical state capacity is not the same topic as React state management.
 - If the question uses indirect wording, infer the technical topic it points at.
+- If the current question is an underspecified follow-up, use the recent visible conversation to infer what "it", "that", or "the distinction" refers to.
 - Use lowercase snake_case topic IDs.
 - Do not include generic helper topics like "question" or "learning".
 - Confidence should reflect whether this is a valid technical topic from the user's question, not whether it already exists in the graph.

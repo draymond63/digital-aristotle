@@ -715,6 +715,24 @@ def test_question_followups_share_open_session():
             os.chdir(old_cwd)
 
 
+def test_followup_topic_resolution_uses_recent_visible_context():
+    with TemporaryDirectory() as dirname:
+        old_cwd = Path.cwd()
+        try:
+            session = make_session(Path(dirname))
+            session.handle("/ask what is covariance?")
+            session.handle("Can you give me a geometric example?")
+
+            resolver_packet = session.agent.question_topic_packets[-1]
+            assert session.question_topic_task.visible_history == 6
+            assert "what is covariance?" in resolver_packet
+            assert "A Kalman filter alternates prediction and correction." in resolver_packet
+            assert "Can you give me a geometric example?" in resolver_packet
+            session.sql_db.close()
+        finally:
+            os.chdir(old_cwd)
+
+
 def test_ask_finalizes_active_question_before_starting_new_question():
     with TemporaryDirectory() as dirname:
         old_cwd = Path.cwd()
@@ -769,6 +787,9 @@ def test_profile_update_gate_uses_model_evaluation_not_evidence_phrase_matching(
             )
             assert updated == ["kalman_filter"]
             assert "kalman_filter" in session.profile.topics
+            assert session.profile.topics["kalman_filter"].intuition == 0.4
+            assert session.profile.topics["kalman_filter"].details == 0.1
+            assert session.profile.topics["kalman_filter"].confidence == 0.5
             assert session.agent.profile_gate_packets
             assert "User understands the basic loop." in session.agent.profile_gate_packets[-1]
             assert "The learner paraphrased prediction and correction." in notes[0]
@@ -1146,6 +1167,7 @@ if __name__ == "__main__":
     test_unrelated_question_does_not_use_profile_topic_memory_hint()
     test_previous_asks_are_deduped_and_exclude_current_question()
     test_question_followups_share_open_session()
+    test_followup_topic_resolution_uses_recent_visible_context()
     test_ask_finalizes_active_question_before_starting_new_question()
     test_profile_update_gate_uses_model_evaluation_not_evidence_phrase_matching()
     test_profile_topic_updates_use_canonical_graph_topic_ids()

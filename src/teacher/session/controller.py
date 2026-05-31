@@ -129,6 +129,7 @@ class LearningSession(QuestionContextMixin, SessionFinalizerMixin, TaskConversat
             "question_topic_resolver",
             QUESTION_TOPIC_RESOLUTION_PROMPT,
             model=get_control_model(),
+            visible_history=6,
             output_format=QuestionTopicResolutionResponse,
             temperature=0.0,
             num_predict=350,

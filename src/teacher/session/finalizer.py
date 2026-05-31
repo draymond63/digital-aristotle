@@ -159,7 +159,7 @@ class SessionFinalizerMixin:
             for key in ("intuition", "details", "confidence"):
                 proposed = float(getattr(item, key))
                 previous = getattr(current, key, 0.0) if current else 0.0
-                values[key] = max(0.0, min(1.0, max(previous, min(previous + 0.25, proposed))))
+                values[key] = max(previous, max(0.0, min(1.0, proposed)))
             if values:
                 self.sql_db.upsert_topic(
                     topic_id,

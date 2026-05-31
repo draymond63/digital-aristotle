@@ -43,7 +43,7 @@ class QuestionContextMixin:
 
     def _resolve_question(self, question: str) -> dict:
         """Resolve a raw question into intent and candidate topics."""
-        conversation = Conversation()
+        conversation = self.conversation.visible_messages().copy()
         conversation.append_user(question)
         known_topics = self.sql_db.get_topic_summaries(limit=40)
         result = self.run_task_json(
