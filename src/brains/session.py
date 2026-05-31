@@ -18,14 +18,15 @@ from brains.comms.prompts_session import (
 )
 from brains.comms.task_conversation import TaskConversation
 from brains.data.db_sql import SQLDatabase
-from brains.data.db_vector import Collection, SemanticDatabase
+from brains.data.db_vector import Collection, MemoryKind, SemanticDatabase
+from brains.data.memory_store import SemanticMemoryStore
 from brains.data.profile import Profile, normalize_identifier
 from brains.session_types import (
     CommandResult,
     FinalizationReport,
     HELP_TEXT,
+    ExtractedMemory,
     GraphUpdatesResponse,
-    MemoryUpdateResponse,
     ProfileUpdateGateResponse,
     SessionGraphUpdatesResponse,
     QuestionTopicResolutionResponse,
@@ -42,6 +43,20 @@ from brains.session_types import (
 logger = logging.getLogger(__name__)
 
 
+def dedupe_by(items, key_fn, on_duplicate=None):
+    deduped = []
+    seen = set()
+    for item in items:
+        key = key_fn(item)
+        if key in seen:
+            if on_duplicate:
+                on_duplicate(item)
+            continue
+        seen.add(key)
+        deduped.append(item)
+    return deduped
+
+
 class LearningSession(TaskConversation):
     def __init__(
         self,
@@ -50,14 +65,17 @@ class LearningSession(TaskConversation):
         vector_db: SemanticDatabase | None = None,
         profile: Profile | None = None,
         agent: Agent | None = None,
+        abandon_active: bool = True,
     ):
         super().__init__(agent=agent)
         self.user_id = normalize_identifier(user_id) or "default_user"
         self.sql_db = sql_db or SQLDatabase()
         self.vector_db = vector_db or SemanticDatabase()
+        self.memory_store = SemanticMemoryStore(self.sql_db, self.vector_db)
         self.profile = profile or Profile.load_user(self.user_id)
         self.teacher_context = ""
-        self.sql_db.abandon_active_question_sessions(self.user_id)
+        if abandon_active:
+            self.sql_db.abandon_active_question_sessions(self.user_id)
         self.mode: SessionMode = "idle"
         self.active_session_id: str | None = None
         self.active_topic_id: str | None = None
@@ -98,7 +116,7 @@ class LearningSession(TaskConversation):
             visible_history=None,
             output_format=SessionMemoryExtractionResponse,
             temperature=0.1,
-            num_predict=700,
+            num_predict=2000,
         )
         self.graph_updates_task = Task(
             "session_graph_updates",
@@ -312,6 +330,7 @@ class LearningSession(TaskConversation):
         return (
             f"User profile:\n{self.profile}\n\n"
             f"Relevant memories:\n{self._query_memories(question, topic_hints=self._graph_connected_profile_topic_hints(question))}\n\n"
+            f"Similar previous questions:\n{self._query_previous_asks(question)}\n\n"
             "Answer this as a focused learning conversation. Keep it useful and lightweight.\n"
             "Use the learner's own wording as the starting point, not a generic overview.\n"
             "If they propose a mental model, sharpen that model and explain the practical consequence.\n"
@@ -326,6 +345,7 @@ class LearningSession(TaskConversation):
         for collection in (
             Collection.INSIGHTS,
             Collection.CONFUSIONS,
+            Collection.PARTIAL_UNDERSTANDINGS,
             Collection.SUCCESSFUL_EXPLANATIONS,
             Collection.LEARNING_PREFERENCES,
         ):
@@ -344,6 +364,19 @@ class LearningSession(TaskConversation):
             if text:
                 parts.append(f"{collection.value}:\n{text}")
         return "\n\n".join(parts) if parts else "none retrieved"
+
+    def _query_previous_asks(self, query: str) -> str:
+        try:
+            asks = self.vector_db.find_asks(query, user_id=self.user_id)
+        except Exception:
+            logger.exception(f"Failed to query previous asks for user {self.user_id}")
+            return "none retrieved"
+        deduped = []
+        for ask in asks:
+            text = ask.strip()
+            if text and text != query and text not in deduped:
+                deduped.append(text)
+        return "\n".join(f"- {ask}" for ask in deduped[:3]) if deduped else "none retrieved"
 
     def _profile_topic_hints(self) -> list[str]:
         return [
@@ -541,8 +574,20 @@ class LearningSession(TaskConversation):
             summary=summary_result.summary or "summary unavailable because session summary extraction failed",
             next_step=summary_result.next_step or "next step unavailable because session summary extraction failed",
             topic_updates=topic_updates_result.topic_updates,
-            memories=memories_result.memories,
+            memories=self._dedupe_memories(memories_result.extracted_memories()),
             graph_updates=self._limit_graph_updates(graph_updates_result.graph_updates),
+        )
+
+    def _dedupe_memories(
+        self,
+        memories: list[ExtractedMemory],
+    ) -> list[ExtractedMemory]:
+        return dedupe_by(
+            memories,
+            key_fn=lambda memory: (memory.kind, normalize_identifier(memory.topic_id)),
+            on_duplicate=lambda memory: logger.warning(
+                f"Skipping duplicate memory update for user {self.user_id}: {memory.json_data()!r}"
+            ),
         )
 
     def _limit_graph_updates(
@@ -658,45 +703,8 @@ class LearningSession(TaskConversation):
             "reason": result.reason.strip(),
         }
 
-    def _save_memories(self, memories: list[MemoryUpdateResponse]) -> int:
-        saved = 0
-        for memory in memories:
-            text = memory.text.strip()
-            if not text or float(memory.confidence) < 0.35:
-                logger.warning(f"Skipping invalid or weak memory for user {self.user_id}: {memory.json_data()!r}")
-                continue
-            memory_type = memory.type
-            if memory_type not in {"insight", "confusion", "successful_explanation", "learning_preference"}:
-                logger.warning(f"Skipping memory with unknown type for user {self.user_id}: {memory.json_data()!r}")
-                continue
-            collection = {
-                "confusion": Collection.CONFUSIONS,
-                "successful_explanation": Collection.SUCCESSFUL_EXPLANATIONS,
-                "learning_preference": Collection.LEARNING_PREFERENCES,
-            }.get(memory_type, Collection.INSIGHTS)
-            memory_id = f"{self.active_session_id or 'session'}-{saved}"
-            try:
-                self.vector_db.add(
-                    collection,
-                    ids=[memory_id],
-                    documents=[text],
-                    metadatas=[
-                        {
-                            "user_id": self.user_id,
-                            "session_id": self.active_session_id or "",
-                            "topic_id": normalize_identifier(memory.topic_id),
-                            "memory_type": memory_type,
-                        }
-                    ],
-                )
-                saved += 1
-            except Exception:
-                logger.exception(
-                    f"Failed to save memory for user {self.user_id} "
-                    f"in collection {collection.value}: {memory.json_data()!r}"
-                )
-                continue
-        return saved
+    def _save_memories(self, memories: list[ExtractedMemory]) -> int:
+        return self.memory_store.save_session_memories(self.user_id, self.active_session_id, memories)
 
     def _apply_graph_updates(self, graph_updates: GraphUpdatesResponse) -> int:
         count = 0

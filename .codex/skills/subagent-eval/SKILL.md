@@ -46,6 +46,27 @@ $env:PYTHONPATH='src'
 & $HOME\.virtualenvs\teacher\Scripts\python.exe .codex\skills\subagent-eval\scripts\inspect_ai_teacher_subagent_eval.py
 ```
 
+7. To re-run memory extraction over saved eval conversations without replaying the conversations or writing vector memories:
+
+```powershell
+$env:PYTHONPATH='src'
+& $HOME\.virtualenvs\teacher\Scripts\python.exe .codex\skills\subagent-eval\scripts\rerun_ai_teacher_memory_finalizer.py --eval-path data\evals\multi-agent-struggle-2026-05-31T00-00-56.json
+```
+
+Use `--apply` only when the user explicitly wants to replace existing vector memories for those resolved sessions:
+
+```powershell
+$env:PYTHONPATH='src'
+& $HOME\.virtualenvs\teacher\Scripts\python.exe .codex\skills\subagent-eval\scripts\rerun_ai_teacher_memory_finalizer.py --eval-path data\evals\multi-agent-struggle-2026-05-31T00-00-56.json --apply
+```
+
+If a reviewed rerun report already exists, apply it locally without new model calls:
+
+```powershell
+$env:PYTHONPATH='src'
+& $HOME\.virtualenvs\teacher\Scripts\python.exe .codex\skills\subagent-eval\scripts\rerun_ai_teacher_memory_finalizer.py --rerun-report data\evals\multi-agent-tightened-memory-finalizer-2026-05-31T09-05-41.json --apply
+```
+
 ## Rules
 
 - Treat each track as a separate learner identity; do not reuse one `user_id` for multiple simulated learners.

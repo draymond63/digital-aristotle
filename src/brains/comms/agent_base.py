@@ -23,7 +23,7 @@ class ResponseObject(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     def json_data(self):
-        return self.model_dump()
+        return self.model_dump(mode="json")
 
 
 @dataclass(frozen=True)

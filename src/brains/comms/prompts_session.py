@@ -42,7 +42,10 @@ Rules:
 - Be conservative.
 - Do not claim mastery from a single correct phrase.
 - Use topic ids that match the actual question or demonstrated concept, not overly broad prerequisite names unless the user directly worked on them.
-- Prefer existing topic IDs from the known graph candidates when they fit.
+- Prefer existing topic IDs from the known graph candidates only when they match the same concept in the same domain.
+- If no existing candidate matches the same concept and domain, create a new precise topic_id.
+- Do not reuse an existing topic because it shares generic words with the new concept.
+- For example, historical state capacity is not the same topic as React state management.
 - Do not create plural, adjectival, or reworded variants of an existing topic ID.
 - Include evidence for every durable update.
 - Return an empty list if the learner did not demonstrate durable understanding.
@@ -56,26 +59,40 @@ Analyze the transcript and return standalone memories only. Do not continue the 
 Return strict JSON only:
 
 {
-  "memories": [
-    {
-      "type": "insight | confusion | successful_explanation | learning_preference",
-      "topic_id": "canonical_topic_id",
-      "text": "durable standalone memory",
-      "confidence": 0.0
-    }
+  "confusions": [
+    {"topic_id": "canonical_topic_id", "text": "durable unresolved confusion", "confidence": 0.0}
+  ],
+  "partial_understandings": [
+    {"topic_id": "canonical_topic_id", "text": "what the learner partly understands and what remains fuzzy", "confidence": 0.0}
+  ],
+  "successful_explanations": [
+    {"topic_id": "canonical_topic_id", "text": "reusable tutor move that helped", "confidence": 0.0}
+  ],
+  "learning_preferences": [
+    {"topic_id": "canonical_topic_id", "text": "stable tutoring preference", "confidence": 0.0}
+  ],
+  "insights": [
+    {"topic_id": "canonical_topic_id", "text": "durable understanding", "confidence": 0.0}
   ]
 }
 
 Rules:
 - Prefer fewer high-quality memories over many weak ones.
+- Store at most one memory per topic in each bucket.
 - Memories must be useful in future tutoring without reading this transcript.
 - Do not store long summaries or evidence dumps.
-- Use "insight" for durable things the learner now understands.
-- Use "confusion" for durable misconceptions, unresolved confusion, or recurring friction points.
-- Use "successful_explanation" for reusable tutor moves that helped this learner understand, such as a framing, analogy, contrast, example type, or sequence that led to clarification.
-- Use "learning_preference" only for stable style or format preferences, not one-off positive reactions.
-- Do not classify every clarified concept as a successful_explanation. That type is about the teaching tactic, not the learner's knowledge.
-- Return an empty list if nothing durable should be saved.
+- Do not store a memory for every answered sub-question; save only durable signals that should change future tutoring.
+- Do not store generic domain facts that belong in lesson content or the topic graph. Store learner-specific state: what this learner now understands, still misunderstands, responded well to, or prefers.
+- If the learner merely follows along, acknowledges, or asks ordinary continuation questions without showing a reusable insight, confusion, preference, or successful explanation pattern, return an empty list.
+- First fill "confusions" with durable misconceptions, unresolved confusion, or recurring friction points. If the learner says they are still unclear, confused, struggling, or cannot distinguish concepts by the end, preserve that as confusion instead of rewriting it as insight.
+- Then fill "partial_understandings" when the learner has a correct but incomplete mental model: they can state one part, but a boundary, mechanism, or distinction remains fuzzy. Use this instead of emitting both an insight and a confusion for the same topic when the same idea is partly resolved and partly unresolved.
+- Then fill "successful_explanations" with reusable tutor moves that helped this learner understand, such as a framing, analogy, contrast, example type, or sequence that led to clarification.
+- A successful explanation must name the reusable teaching move. Do not save "explaining X helped" unless the text says what specific move made it work.
+- Then fill "learning_preferences" only for stable style or format preferences, not one-off positive reactions.
+- Fill "insights" last with durable things the learner now understands. Do not put unresolved or partial understanding here just because the tutor explained it.
+- An insight must be grounded in learner evidence: their paraphrase, correction, synthesis, application, or successful boundary-case reasoning. Do not save an insight just because the assistant stated the fact.
+- If a learner both understands one distinction and remains confused about another, save one insight and one confusion in their respective buckets.
+- Return empty arrays for buckets with nothing durable.
 """
 
 
@@ -148,6 +165,8 @@ Rules:
 - Do not require special wording in the evidence field. Judge the transcript directly.
 - Be conservative with mastery, but do not reject a valid small update because the evidence sentence uses different phrasing.
 - The proposed topic_id must match the concept actually discussed or demonstrated.
+- Reject if the proposed topic_id belongs to a different domain or concept than the transcript, even when some words overlap.
+- For example, a history discussion of state capacity must not update a React state-management topic.
 - Return false when the transcript does not support the proposed intuition/details/confidence levels.
 """
 
@@ -173,7 +192,10 @@ Return strict JSON only:
 
 Rules:
 - Return 1 to 3 topics.
-- Prefer existing topic IDs from the known topic graph candidates when they fit.
+- Prefer existing topic IDs from the known topic graph candidates only when they match the same concept in the same domain.
+- If no existing candidate matches the same concept and domain, create a new precise topic_id.
+- Do not reuse an existing topic because it shares generic words with the question.
+- For example, historical state capacity is not the same topic as React state management.
 - If the question uses indirect wording, infer the technical topic it points at.
 - Use lowercase snake_case topic IDs.
 - Do not include generic helper topics like "question" or "learning".
@@ -202,9 +224,11 @@ Return strict JSON only:
 
 Rules:
 - Use only existing topic_id values from the candidate list.
-- Return "same_as" when the new topic is essentially the same concept as an existing graph topic.
+- Return "same_as" only when the new topic is essentially the same concept in the same domain as an existing graph topic.
 - Return a typed relation when the new topic is genuinely connected to an existing graph topic.
 - Return no connection for unrelated topics, even if both are technical.
+- Do not connect topics just because they share generic words.
+- For example, historical state capacity is unrelated to React state management unless the transcript explicitly compares those domains.
 - Prefer fewer high-confidence connections over broad weak links.
 - Confidence must reflect conceptual relatedness, not user interest.
 """

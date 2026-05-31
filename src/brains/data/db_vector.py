@@ -5,9 +5,30 @@ from hashlib import sha1
 class Collection(StrEnum):
     INSIGHTS = "insights"
     CONFUSIONS = "confusions"
+    PARTIAL_UNDERSTANDINGS = "partial_understandings"
     PREVIOUS_ASKS = "previous_asks"
     SUCCESSFUL_EXPLANATIONS = "successful_explanations"
     LEARNING_PREFERENCES = "learning_preferences"
+
+
+class MemoryKind(StrEnum):
+    INSIGHT = "insights"
+    CONFUSION = "confusions"
+    PARTIAL_UNDERSTANDING = "partial_understandings"
+    SUCCESSFUL_EXPLANATION = "successful_explanations"
+    LEARNING_PREFERENCE = "learning_preferences"
+
+    @property
+    def memory_type(self) -> str:
+        return self.value.removesuffix("s")
+
+    @property
+    def collection(self) -> Collection:
+        return Collection(self.value)
+
+    @classmethod
+    def vector_collections(cls) -> tuple[Collection, ...]:
+        return tuple(kind.collection for kind in cls)
 
 
 class SemanticDatabase:
@@ -47,6 +68,23 @@ class SemanticDatabase:
         if metadatas is not None:
             kwargs["metadatas"] = metadatas
         collection.upsert(**kwargs)
+
+    def ids_for_metadata(self, collection_name: Collection, **metadata_filter) -> list[str]:
+        collection = self.collection(collection_name)
+        ids = []
+        if "user_id" in metadata_filter:
+            response = collection.get(where=self._user_where(metadata_filter["user_id"]), include=["metadatas"])
+        else:
+            response = collection.get(include=["metadatas"])
+        for item_id, metadata in zip(response.get("ids") or [], response.get("metadatas") or []):
+            if all(metadata.get(key) == value for key, value in metadata_filter.items()):
+                ids.append(item_id)
+        return ids
+
+    def delete_ids(self, collection_name: Collection, ids: list[str]):
+        if not ids:
+            return
+        self.collection(collection_name).delete(ids=ids)
 
     def query_pretty(self, *args, max_dist=0.8, user_id: str | None = None, **kwargs):
         if user_id:

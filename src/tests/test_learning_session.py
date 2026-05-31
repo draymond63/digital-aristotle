@@ -4,8 +4,22 @@ import os
 
 from brains.data.db_sql import SQLDatabase
 from brains.data.profile import Profile
+from brains.comms.prompts_session import (
+    PROFILE_UPDATE_GATE_PROMPT,
+    QUESTION_TOPIC_RESOLUTION_PROMPT,
+    SESSION_MEMORY_EXTRACTION_PROMPT,
+    SESSION_TOPIC_UPDATES_PROMPT,
+    TOPIC_GRAPH_CONNECTION_PROMPT,
+)
 from brains.session import LearningSession
-from brains.session_types import GraphEdgeResponse, GraphTopicResponse, GraphUpdatesResponse, TopicUpdateResponse
+from brains.session_types import (
+    GraphEdgeResponse,
+    GraphTopicResponse,
+    GraphUpdatesResponse,
+    MemoryUpdateResponse,
+    SessionMemoryExtractionResponse,
+    TopicUpdateResponse,
+)
 
 
 class FakeVectorDB:
@@ -13,6 +27,7 @@ class FakeVectorDB:
         self.added = []
         self.asks = []
         self.queries = []
+        self.previous_ask_queries = []
 
     def log_ask(self, msg, session_id, user_id=None):
         self.asks.append((msg, session_id, user_id))
@@ -20,6 +35,10 @@ class FakeVectorDB:
     def query_pretty(self, *args, **kwargs):
         self.queries.append((args, kwargs))
         return ""
+
+    def find_asks(self, query, max_dist=0.5, user_id=None):
+        self.previous_ask_queries.append((query, max_dist, user_id))
+        return ["what is covariance?"]
 
     def add(self, collection_name, ids, documents, metadatas=None):
         self.added.append((collection_name, ids, documents, metadatas))
@@ -59,15 +78,15 @@ class FakeAgent:
         if task.name == "session_memory_extraction":
             self.finalized = True
             return task.output_format.model_validate({
-                "memories": [
+                "insights": [
                     {
-                        "type": "insight",
                         "topic_id": "kalman_filter",
                         "text": "Learner framed Kalman filtering as prediction then correction.",
                         "confidence": 0.8,
-                    },
+                    }
+                ],
+                "successful_explanations": [
                     {
-                        "type": "successful_explanation",
                         "topic_id": "kalman_filter",
                         "text": "Prediction-then-correction framing helped the learner understand Kalman filters.",
                         "confidence": 0.8,
@@ -190,9 +209,39 @@ def test_schema_is_idempotent():
         db = SQLDatabase(path)
         db.cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='learning_sessions'")
         assert db.cursor.fetchone() is not None
+        db.cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='semantic_memories'")
+        assert db.cursor.fetchone() is not None
         db.cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
         removed_table = "learning_" + "go" + "als"
         assert removed_table not in {row["name"] for row in db.cursor.fetchall()}
+        db.close()
+
+
+def test_find_learning_session_by_conversation_path():
+    with TemporaryDirectory() as dirname:
+        db = SQLDatabase(Path(dirname) / "data" / "test.db")
+        session_id = db.create_learning_session("tester", "question")
+        db.finish_learning_session(session_id, conversation_path="data/conversations/example.json")
+        assert db.find_learning_session_by_conversation("tester", "data/conversations/example.json") == session_id
+        assert db.find_learning_session_by_conversation("other", "data/conversations/example.json") is None
+        db.close()
+
+
+def test_semantic_memories_can_be_marked_replaced():
+    with TemporaryDirectory() as dirname:
+        db = SQLDatabase(Path(dirname) / "data" / "test.db")
+        session_id = db.create_learning_session("tester", "question")
+        memory_id = db.insert_semantic_memory(
+            user_id="tester",
+            session_id=session_id,
+            collection="insights",
+            topic_id="confidence_interval",
+            text="Learner understands coverage.",
+            extraction_prompt_version="test",
+        )
+        assert db.live_semantic_memory_ids("tester", session_id) == [memory_id]
+        assert db.mark_semantic_memories_replaced("tester", session_id) == 1
+        assert db.live_semantic_memory_ids("tester", session_id) == []
         db.close()
 
 
@@ -208,10 +257,12 @@ def test_question_session_lifecycle_and_finalization():
             assert queried_collections == {
                 "insights",
                 "confusions",
+                "partial_understandings",
                 "successful_explanations",
                 "learning_preferences",
             }
             assert all(kwargs["user_id"] == "tester" for _, kwargs in session.vector_db.queries)
+            assert session.vector_db.previous_ask_queries[0][2] == "tester"
             assert session.mode == "question"
             session.sql_db.cursor.execute(
                 "SELECT status, conversation_path FROM learning_sessions WHERE id = ?",
@@ -232,6 +283,10 @@ def test_question_session_lifecycle_and_finalization():
             saved_collections = [item[0] for item in session.vector_db.added]
             assert "insights" in saved_collections
             assert "successful_explanations" in saved_collections
+            session.sql_db.cursor.execute("SELECT id, collection, text FROM semantic_memories WHERE user_id = ?", ("tester",))
+            rows = session.sql_db.cursor.fetchall()
+            assert len(rows) == len(session.vector_db.added)
+            assert {row["id"] for row in rows} == {item[1][0] for item in session.vector_db.added}
             assert session.mode == "idle"
             session.sql_db.close()
         finally:
@@ -323,6 +378,26 @@ def test_unrelated_question_does_not_use_profile_topic_memory_hint():
             assert session.agent.question_topic_packets
             assert session.agent.topic_connection_packets
             assert session.sql_db.topic_exists("http_cache_validation")
+            session.sql_db.close()
+        finally:
+            os.chdir(old_cwd)
+
+
+def test_previous_asks_are_deduped_and_exclude_current_question():
+    with TemporaryDirectory() as dirname:
+        old_cwd = Path.cwd()
+        try:
+            session = make_session(Path(dirname))
+            session.vector_db.find_asks = lambda query, user_id=None: [
+                query,
+                "Why does a confidence interval not mean 95% probability for this parameter?",
+                "Why does a confidence interval not mean 95% probability for this parameter?",
+                "How does repeated sampling enter the interpretation?",
+            ]
+            previous = session._query_previous_asks("What does a confidence interval mean?")
+            assert "What does a confidence interval mean?" not in previous
+            assert previous.count("confidence interval") == 1
+            assert "repeated sampling" in previous
             session.sql_db.close()
         finally:
             os.chdir(old_cwd)
@@ -538,6 +613,16 @@ def test_plural_topic_id_resolves_to_existing_singular_topic():
         db.close()
 
 
+def test_topic_summaries_do_not_emit_null_descriptions():
+    with TemporaryDirectory() as dirname:
+        db = SQLDatabase(Path(dirname) / "data" / "test.db")
+        db.upsert_topic("embeddings", name="Embeddings")
+        summaries = db.get_topic_summaries()
+        embeddings = next(item for item in summaries if item["topic_id"] == "embeddings")
+        assert embeddings["description"] == ""
+        db.close()
+
+
 def test_graph_finalizer_gets_existing_topic_candidates():
     with TemporaryDirectory() as dirname:
         old_cwd = Path.cwd()
@@ -640,6 +725,62 @@ def test_graph_updates_are_limited_before_persistence():
             os.chdir(old_cwd)
 
 
+def test_memory_updates_are_deduped_before_persistence():
+    with TemporaryDirectory() as dirname:
+        old_cwd = Path.cwd()
+        try:
+            session = make_session(Path(dirname))
+            limited = session._dedupe_memories(
+                [
+                    MemoryUpdateResponse(type="insight", topic_id="topic_1", confidence=0.1, text="Weak."),
+                    MemoryUpdateResponse(type="insight", topic_id="topic_2", confidence=0.9, text="Strong."),
+                    MemoryUpdateResponse(type="confusion", topic_id="topic_3", confidence=0.7, text="Open."),
+                    MemoryUpdateResponse(type="learning_preference", topic_id="topic_4", confidence=0.8, text="Style."),
+                    MemoryUpdateResponse(type="successful_explanation", topic_id="topic_5", confidence=0.6, text="Move."),
+                    MemoryUpdateResponse(type="insight", topic_id="topic_2", confidence=1.0, text="Duplicate."),
+                ]
+            )
+            assert [(memory.kind.memory_type, memory.topic_id) for memory in limited] == [
+                ("insight", "topic_1"),
+                ("insight", "topic_2"),
+                ("confusion", "topic_3"),
+                ("learning_preference", "topic_4"),
+                ("successful_explanation", "topic_5"),
+            ]
+            session.sql_db.close()
+        finally:
+            os.chdir(old_cwd)
+
+
+def test_memory_buckets_convert_to_extracted_memories():
+    memories = SessionMemoryExtractionResponse.model_validate(
+        {
+            "confusions": [
+                {"topic_id": "confidence_interval", "text": "Still confuses coverage with posterior probability.", "confidence": 0.8}
+            ],
+            "partial_understandings": [
+                {"topic_id": "confidence_interval", "text": "Partly understands procedure-level coverage but not single intervals.", "confidence": 0.75}
+            ],
+            "successful_explanations": [
+                {"topic_id": "confidence_interval", "text": "Repeated-sampling contrast helped.", "confidence": 0.7}
+            ],
+            "learning_preferences": [
+                {"topic_id": "confidence_interval", "text": "Prefers boundary cases.", "confidence": 0.6}
+            ],
+            "insights": [
+                {"topic_id": "confidence_interval", "text": "Understands coverage as procedure-level.", "confidence": 0.9}
+            ],
+        }
+    ).extracted_memories()
+    assert [memory.kind.memory_type for memory in memories] == [
+        "confusion",
+        "partial_understanding",
+        "successful_explanation",
+        "learning_preference",
+        "insight",
+    ]
+
+
 def test_graph_response_normalizes_null_text_before_limiting():
     result = GraphUpdatesResponse.model_validate(
         {
@@ -674,13 +815,40 @@ def test_graph_response_normalizes_null_text_before_limiting():
     assert result.edges[0].evidence == ""
 
 
+def test_topic_prompts_reject_cross_domain_word_overlap():
+    prompts = [
+        SESSION_TOPIC_UPDATES_PROMPT,
+        PROFILE_UPDATE_GATE_PROMPT,
+        QUESTION_TOPIC_RESOLUTION_PROMPT,
+        TOPIC_GRAPH_CONNECTION_PROMPT,
+    ]
+    for prompt in prompts:
+        assert "same domain" in prompt or "different domain" in prompt
+        assert "state capacity" in prompt
+        assert "React state" in prompt
+
+
+def test_memory_extraction_prompt_has_hard_budget_and_failure_case():
+    assert "Prefer fewer high-quality memories" in SESSION_MEMORY_EXTRACTION_PROMPT
+    assert "confusions" in SESSION_MEMORY_EXTRACTION_PROMPT
+    assert "partial_understandings" in SESSION_MEMORY_EXTRACTION_PROMPT
+    assert "Fill \"insights\" last" in SESSION_MEMORY_EXTRACTION_PROMPT
+    assert "Do not store generic domain facts" in SESSION_MEMORY_EXTRACTION_PROMPT
+    assert "must name the reusable teaching move" in SESSION_MEMORY_EXTRACTION_PROMPT
+    assert "grounded in learner evidence" in SESSION_MEMORY_EXTRACTION_PROMPT
+    assert "return empty arrays" in SESSION_MEMORY_EXTRACTION_PROMPT.lower()
+
+
 if __name__ == "__main__":
     test_schema_is_idempotent()
+    test_find_learning_session_by_conversation_path()
+    test_semantic_memories_can_be_marked_replaced()
     test_question_session_lifecycle_and_finalization()
     test_bare_message_starts_question_session()
     test_question_context_steers_away_from_generic_overview()
     test_question_memory_query_uses_graph_connected_profile_topics()
     test_unrelated_question_does_not_use_profile_topic_memory_hint()
+    test_previous_asks_are_deduped_and_exclude_current_question()
     test_question_followups_share_open_session()
     test_ask_finalizes_active_question_before_starting_new_question()
     test_profile_update_gate_uses_model_evaluation_not_evidence_phrase_matching()
@@ -690,8 +858,13 @@ if __name__ == "__main__":
     test_topic_session_links_do_not_create_self_edges()
     test_topic_aliases_merge_and_resolve()
     test_plural_topic_id_resolves_to_existing_singular_topic()
+    test_topic_summaries_do_not_emit_null_descriptions()
     test_graph_finalizer_gets_existing_topic_candidates()
     test_graph_updates_skip_weak_invalid_and_self_edges()
+    test_memory_updates_are_deduped_before_persistence()
+    test_memory_buckets_convert_to_extracted_memories()
     test_graph_updates_are_limited_before_persistence()
     test_graph_response_normalizes_null_text_before_limiting()
+    test_topic_prompts_reject_cross_domain_word_overlap()
+    test_memory_extraction_prompt_has_hard_budget_and_failure_case()
     print("learning session tests passed")

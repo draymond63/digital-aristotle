@@ -3,9 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 
 from brains.comms.agent_base import ResponseObject
+from brains.data.db_vector import MemoryKind
 
 
 SessionMode = Literal["idle", "question"]
@@ -24,13 +25,57 @@ class TopicUpdateResponse(ResponseObject):
         return "" if value is None else value
 
 
-class MemoryUpdateResponse(ResponseObject):
-    type: str = "insight"
+class ExtractedMemory(ResponseObject):
+    kind: MemoryKind = MemoryKind.INSIGHT
     topic_id: str = ""
     text: str = ""
     confidence: float = 0.0
 
-    @field_validator("type", "topic_id", "text", mode="before")
+    @model_validator(mode="before")
+    @classmethod
+    def accept_type_alias(cls, data):
+        if isinstance(data, dict) and "type" in data and "kind" not in data:
+            data = dict(data)
+            data["kind"] = data.pop("type")
+        return data
+
+    @field_validator("kind", mode="before")
+    @classmethod
+    def type_to_kind(cls, value):
+        if isinstance(value, MemoryKind):
+            return value
+        if value == "partial_understanding":
+            return MemoryKind.PARTIAL_UNDERSTANDING
+        for kind in MemoryKind:
+            if value in {kind.value, kind.memory_type}:
+                return kind
+        return value
+
+    @property
+    def type(self) -> str:
+        return self.kind.memory_type
+
+    def json_data(self):
+        data = super().json_data()
+        data["type"] = self.kind.memory_type
+        del data["kind"]
+        return data
+
+    @field_validator("topic_id", "text", mode="before")
+    @classmethod
+    def none_to_empty_string(cls, value):
+        return "" if value is None else value
+
+
+MemoryUpdateResponse = ExtractedMemory
+
+
+class MemoryBucketItemResponse(ResponseObject):
+    topic_id: str = ""
+    text: str = ""
+    confidence: float = 0.0
+
+    @field_validator("topic_id", "text", mode="before")
     @classmethod
     def none_to_empty_string(cls, value):
         return "" if value is None else value
@@ -82,7 +127,35 @@ class SessionTopicUpdatesResponse(ResponseObject):
 
 
 class SessionMemoryExtractionResponse(ResponseObject):
-    memories: list[MemoryUpdateResponse] = Field(default_factory=list)
+    confusions: list[MemoryBucketItemResponse] = Field(default_factory=list)
+    partial_understandings: list[MemoryBucketItemResponse] = Field(default_factory=list)
+    successful_explanations: list[MemoryBucketItemResponse] = Field(default_factory=list)
+    learning_preferences: list[MemoryBucketItemResponse] = Field(default_factory=list)
+    insights: list[MemoryBucketItemResponse] = Field(default_factory=list)
+
+    @staticmethod
+    def _typed_memories(
+        memory_type: MemoryKind,
+        memories: list[MemoryBucketItemResponse],
+    ) -> list[ExtractedMemory]:
+        return [
+            ExtractedMemory(
+                kind=memory_type,
+                topic_id=memory.topic_id,
+                text=memory.text,
+                confidence=memory.confidence,
+            )
+            for memory in memories
+        ]
+
+    def extracted_memories(self) -> list[ExtractedMemory]:
+        return [
+            *self._typed_memories(MemoryKind.CONFUSION, self.confusions),
+            *self._typed_memories(MemoryKind.PARTIAL_UNDERSTANDING, self.partial_understandings),
+            *self._typed_memories(MemoryKind.SUCCESSFUL_EXPLANATION, self.successful_explanations),
+            *self._typed_memories(MemoryKind.LEARNING_PREFERENCE, self.learning_preferences),
+            *self._typed_memories(MemoryKind.INSIGHT, self.insights),
+        ]
 
 
 class SessionGraphUpdatesResponse(ResponseObject):
@@ -93,7 +166,7 @@ class SessionFinalizationResponse(ResponseObject):
     summary: str = ""
     next_step: str = ""
     topic_updates: list[TopicUpdateResponse] = Field(default_factory=list)
-    memories: list[MemoryUpdateResponse] = Field(default_factory=list)
+    memories: list[ExtractedMemory] = Field(default_factory=list)
     graph_updates: GraphUpdatesResponse = Field(default_factory=GraphUpdatesResponse)
 
 

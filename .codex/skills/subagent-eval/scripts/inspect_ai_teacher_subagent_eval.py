@@ -79,7 +79,7 @@ def print_sql(users: tuple[str, ...]) -> None:
     placeholders = ",".join("?" for _ in users)
 
     print("\nSQL")
-    for table in ("learning_sessions", "update_audit_log", "mastery_history"):
+    for table in ("learning_sessions", "update_audit_log", "mastery_history", "semantic_memories"):
         rows = db.execute(
             f"SELECT * FROM {table} WHERE user_id IN ({placeholders}) ORDER BY rowid",
             users,

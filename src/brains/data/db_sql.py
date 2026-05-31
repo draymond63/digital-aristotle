@@ -147,6 +147,19 @@ class SQLDatabase:
             created_at TEXT NOT NULL
         )
         """)
+        c.execute("""
+        CREATE TABLE IF NOT EXISTS semantic_memories (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            session_id TEXT NOT NULL,
+            collection TEXT NOT NULL,
+            topic_id TEXT NOT NULL,
+            text TEXT NOT NULL,
+            extraction_prompt_version TEXT,
+            created_at TEXT NOT NULL,
+            replaced_at TEXT
+        )
+        """)
 
         conn.commit()
         return conn
@@ -273,7 +286,7 @@ class SQLDatabase:
                 {
                     "topic_id": row["id"],
                     "name": row["name"],
-                    "description": row["description"],
+                    "description": row["description"] or "",
                     "aliases": aliases if isinstance(aliases, list) else [],
                     "confidence": row["confidence"],
                 }
@@ -474,6 +487,77 @@ class SQLDatabase:
             (conversation_path, session_id),
         )
         self.conn.commit()
+
+    def find_learning_session_by_conversation(self, user_id: str, conversation_path: str) -> str | None:
+        self.cursor.execute(
+            """
+            SELECT id
+            FROM learning_sessions
+            WHERE user_id = ? AND conversation_path = ?
+            ORDER BY ended_at DESC, started_at DESC
+            LIMIT 1
+            """,
+            (user_id, conversation_path),
+        )
+        row = self.cursor.fetchone()
+        return row["id"] if row else None
+
+    def insert_semantic_memory(
+        self,
+        user_id: str,
+        session_id: str,
+        collection: str,
+        topic_id: str,
+        text: str,
+        extraction_prompt_version: str,
+    ) -> str:
+        memory_id = self._new_id("mem")
+        self.cursor.execute(
+            f"""
+            INSERT INTO semantic_memories
+                (id, user_id, session_id, collection, topic_id, text, extraction_prompt_version, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, {self._now_sql()})
+            """,
+            (memory_id, user_id, session_id, collection, topic_id, text, extraction_prompt_version),
+        )
+        self.conn.commit()
+        return memory_id
+
+    def live_semantic_memory_ids(self, user_id: str, session_id: str, collection: str | None = None) -> list[str]:
+        if collection:
+            self.cursor.execute(
+                """
+                SELECT id
+                FROM semantic_memories
+                WHERE user_id = ? AND session_id = ? AND collection = ? AND replaced_at IS NULL
+                ORDER BY created_at, id
+                """,
+                (user_id, session_id, collection),
+            )
+        else:
+            self.cursor.execute(
+                """
+                SELECT id
+                FROM semantic_memories
+                WHERE user_id = ? AND session_id = ? AND replaced_at IS NULL
+                ORDER BY created_at, id
+                """,
+                (user_id, session_id),
+            )
+        return [row["id"] for row in self.cursor.fetchall()]
+
+    def mark_semantic_memories_replaced(self, user_id: str, session_id: str) -> int:
+        self.cursor.execute(
+            f"""
+            UPDATE semantic_memories
+            SET replaced_at = {self._now_sql()}
+            WHERE user_id = ? AND session_id = ? AND replaced_at IS NULL
+            """,
+            (user_id, session_id),
+        )
+        count = self.cursor.rowcount
+        self.conn.commit()
+        return count
 
     def write_audit_log(
         self,

@@ -5,6 +5,14 @@ class FakeCollection:
     def __init__(self):
         self.upserts = []
         self.queries = []
+        self.deleted = []
+        self.rows = {
+            "ids": ["a", "b"],
+            "metadatas": [
+                {"user_id": "tester", "session_id": "sess_1"},
+                {"user_id": "tester", "session_id": "sess_2"},
+            ],
+        }
 
     def upsert(self, **kwargs):
         self.upserts.append(kwargs)
@@ -12,6 +20,13 @@ class FakeCollection:
     def query(self, **kwargs):
         self.queries.append(kwargs)
         return {"documents": [["remember this"]], "distances": [[0.1]]}
+
+    def get(self, **kwargs):
+        self.queries.append(kwargs)
+        return self.rows
+
+    def delete(self, **kwargs):
+        self.deleted.append(kwargs)
 
 
 class MultiQueryCollection(FakeCollection):
@@ -90,9 +105,28 @@ def test_query_pretty_flattens_multiple_query_results():
     assert text.index("better match") < text.index("remember this")
 
 
+def test_ids_for_metadata_filters_client_side_after_user_filter():
+    db = make_db()
+    ids = db.ids_for_metadata(Collection.INSIGHTS, user_id="tester", session_id="sess_1")
+    collection = db.collection(Collection.INSIGHTS)
+    assert ids == ["a"]
+    assert collection.queries[0]["where"] == {"user_id": {"$eq": "tester"}}
+
+
+def test_delete_ids_skips_empty_ids():
+    db = make_db()
+    db.delete_ids(Collection.INSIGHTS, [])
+    collection = db.collection(Collection.INSIGHTS)
+    assert not collection.deleted
+    db.delete_ids(Collection.INSIGHTS, ["a"])
+    assert collection.deleted == [{"ids": ["a"]}]
+
+
 if __name__ == "__main__":
     test_log_ask_stores_user_metadata()
     test_log_ask_uses_unique_ids_per_question()
     test_query_filters_by_user_id()
     test_query_pretty_flattens_multiple_query_results()
+    test_ids_for_metadata_filters_client_side_after_user_filter()
+    test_delete_ids_skips_empty_ids()
     print("vector database tests passed")
