@@ -17,6 +17,13 @@ $env:PYTHONPATH='src'
 & $HOME\.virtualenvs\teacher\Scripts\python.exe .codex\skills\subagent-eval\scripts\run_ai_teacher_subagent_eval.py --agents 5 --preview
 ```
 
+Use `--scenario extension` when continuing from the previous five eval learners with related but different questions:
+
+```powershell
+$env:PYTHONPATH='src'
+& $HOME\.virtualenvs\teacher\Scripts\python.exe .codex\skills\subagent-eval\scripts\run_ai_teacher_subagent_eval.py --agents 5 --scenario extension --preview
+```
+
 3. Show the preview to the user and wait for approval or edits.
 4. After approval, run the repo-local wrapper script without `--preview`:
 
@@ -53,6 +60,6 @@ $env:PYTHONPATH='src'
 
 The wrapper owns the default `TRACKS` and `run_track` implementation. To change the default questions or add more agents, edit `.codex/skills/subagent-eval/scripts/run_ai_teacher_subagent_eval.py`.
 
-Use a larger `--agents` value than the available default tracks only after adding more tracks to the utility. The script fails loudly when the count cannot be satisfied.
+Use a larger `--agents` value than the available default tracks only after adding more tracks to the utility. The script fails loudly when the count cannot be satisfied. Use `SCENARIOS` to add separate scenario sets such as continuation tracks.
 
 The inspector defaults to the newest `data/evals/multi-agent-knowledge-*.json` artifact. Use `--eval-path` to inspect a specific artifact and `--users` to inspect a subset of persisted users.
