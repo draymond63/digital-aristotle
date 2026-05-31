@@ -21,6 +21,7 @@ from brains.data.db_sql import SQLDatabase
 from brains.data.db_vector import Collection, MemoryKind, SemanticDatabase
 from brains.data.memory_store import SemanticMemoryStore
 from brains.data.profile import Profile, normalize_identifier
+from brains.question_planner import QuestionPlanner
 from brains.session_types import (
     CommandResult,
     FinalizationReport,
@@ -30,6 +31,7 @@ from brains.session_types import (
     ProfileUpdateGateResponse,
     SessionGraphUpdatesResponse,
     QuestionTopicResolutionResponse,
+    QuestionPlan,
     SessionFinalizationResponse,
     SessionMemoryExtractionResponse,
     SessionMode,
@@ -73,6 +75,7 @@ class LearningSession(TaskConversation):
         self.vector_db = vector_db or SemanticDatabase()
         self.memory_store = SemanticMemoryStore(self.sql_db, self.vector_db)
         self.profile = profile or Profile.load_user(self.user_id)
+        self.question_planner = QuestionPlanner(self.sql_db, self.profile)
         self.teacher_context = ""
         if abandon_active:
             self.sql_db.abandon_active_question_sessions(self.user_id)
@@ -327,17 +330,57 @@ class LearningSession(TaskConversation):
         yield from self.stream_task(self.teacher_task, self.conversation, dynamic_prompts=dynamic_prompts)
 
     def _build_question_context(self, question: str) -> str:
+        plan = self._build_question_plan(question)
+        if plan.target_topics:
+            self.active_topic_id = plan.target_topics[0]
         return (
             f"User profile:\n{self.profile}\n\n"
-            f"Relevant memories:\n{self._query_memories(question, topic_hints=self._graph_connected_profile_topic_hints(question))}\n\n"
+            f"{plan.render()}\n\n"
+            f"Relevant memories:\n{self._query_memories(question, topic_hints=plan.memory_topic_hints)}\n\n"
             f"Similar previous questions:\n{self._query_previous_asks(question)}\n\n"
             "Answer this as a focused learning conversation. Keep it useful and lightweight.\n"
             "Use the learner's own wording as the starting point, not a generic overview.\n"
             "If they propose a mental model, sharpen that model and explain the practical consequence.\n"
             "If they say they are fuzzy, answer the fuzzy distinction directly before offering advice.\n"
+            "Use the question plan as temporary planning context, not as durable profile fact.\n"
+            "Only mention assumptions when they are uncertain enough to affect the learning path.\n"
             "When relevant memories are retrieved, use them to continue the prior line of reasoning rather than restarting from a generic explanation.\n"
             "Avoid broad comparison lists unless the learner explicitly asks for a list."
         )
+
+    def _build_question_plan(self, question: str) -> QuestionPlan:
+        question_resolution = self._resolve_question(question)
+        target_topics = self._place_question_topics(question_resolution["topics"])
+        return self.question_planner.build(target_topics, self._profile_topic_hints(), question_resolution["intent"])
+
+    def _resolve_question(self, question: str) -> dict:
+        conversation = Conversation()
+        conversation.append_user(question)
+        known_topics = self.sql_db.get_topic_summaries(limit=40)
+        result = self.run_task_json(
+            self.question_topic_task,
+            conversation,
+            dynamic_prompts=[
+                f"User profile:\n{self.profile}",
+                f"Known topic graph candidates:\n{json.dumps(known_topics, ensure_ascii=True)}",
+            ],
+            default=QuestionTopicResolutionResponse(),
+            error_message=f"Failed to resolve question topics for user {self.user_id}",
+        )
+        topics = []
+        for item in result.topics:
+            topic_id = normalize_identifier(item.topic_id)
+            if not topic_id:
+                continue
+            topics.append(
+                {
+                    "topic_id": self.sql_db.resolve_topic_id(topic_id),
+                    "name": item.name or topic_id.replace("_", " ").title(),
+                    "description": item.description or "",
+                    "confidence": float(item.confidence),
+                }
+            )
+        return {"intent": result.intent, "topics": topics[:3]}
 
     def _query_memories(self, query: str, topic_hints: list[str] | None = None) -> str:
         parts = []
@@ -388,44 +431,8 @@ class LearningSession(TaskConversation):
             )[:5]
         ]
 
-    def _graph_connected_profile_topic_hints(self, question: str) -> list[str]:
-        profile_topics = self._profile_topic_hints()
-        if not profile_topics:
-            return []
-        question_topics = self._resolve_question_topics(question)
-        if not question_topics:
-            return []
-        placed_topics = self._place_question_topics(question_topics)
-        return self.sql_db.connected_targets(placed_topics, profile_topics, max_hops=2)
-
     def _resolve_question_topics(self, question: str) -> list[str]:
-        conversation = Conversation()
-        conversation.append_user(question)
-        known_topics = self.sql_db.get_topic_summaries(limit=40)
-        result = self.run_task_json(
-            self.question_topic_task,
-            conversation,
-            dynamic_prompts=[
-                f"User profile:\n{self.profile}",
-                f"Known topic graph candidates:\n{json.dumps(known_topics, ensure_ascii=True)}",
-            ],
-            default=QuestionTopicResolutionResponse(),
-            error_message=f"Failed to resolve question topics for user {self.user_id}",
-        )
-        topics = []
-        for item in result.topics:
-            topic_id = normalize_identifier(item.topic_id)
-            if not topic_id:
-                continue
-            topics.append(
-                {
-                    "topic_id": self.sql_db.resolve_topic_id(topic_id),
-                    "name": item.name or topic_id.replace("_", " ").title(),
-                    "description": item.description or "",
-                    "confidence": float(item.confidence),
-                }
-            )
-        return topics[:3]
+        return self._resolve_question(question)["topics"]
 
     def _place_question_topics(self, topics: list[dict]) -> list[str]:
         placed = []

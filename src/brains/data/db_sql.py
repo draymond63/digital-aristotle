@@ -323,6 +323,73 @@ class SQLDatabase:
             frontier = neighbors
         return [topic for topic in target_topics if self.resolve_topic_id(topic) in found]
 
+    def neighboring_topic_ids(self, topic_ids: list[str], max_hops: int = 1) -> list[str]:
+        starts = [self.resolve_topic_id(topic) for topic in topic_ids if self.resolve_topic_id(topic)]
+        if not starts:
+            return []
+        frontier = set(starts)
+        visited = set(starts)
+        ordered = []
+        for _ in range(max_hops):
+            if not frontier:
+                break
+            placeholders = ",".join("?" for _ in frontier)
+            self.cursor.execute(
+                f"""
+                SELECT topic1, topic2 FROM topic_edges
+                WHERE topic1 IN ({placeholders})
+                OR topic2 IN ({placeholders})
+                """,
+                [*frontier, *frontier],
+            )
+            neighbors = set()
+            for row in self.cursor.fetchall():
+                neighbors.add(row["topic1"])
+                neighbors.add(row["topic2"])
+            neighbors -= visited
+            for topic_id in sorted(neighbors):
+                if topic_id not in ordered:
+                    ordered.append(topic_id)
+            visited |= neighbors
+            frontier = neighbors
+        return ordered
+
+    def neighboring_topic_edges(self, topic_ids: list[str]) -> list[dict]:
+        starts = [self.resolve_topic_id(topic) for topic in topic_ids if self.resolve_topic_id(topic)]
+        if not starts:
+            return []
+        placeholders = ",".join("?" for _ in starts)
+        self.cursor.execute(
+            f"""
+            SELECT topic1, topic2, relation_type, confidence
+            FROM topic_edges
+            WHERE topic1 IN ({placeholders})
+            OR topic2 IN ({placeholders})
+            """,
+            [*starts, *starts],
+        )
+        start_set = set(starts)
+        edges = []
+        seen = set()
+        for row in self.cursor.fetchall():
+            topic1 = row["topic1"]
+            topic2 = row["topic2"]
+            if topic1 in start_set and topic2 in start_set:
+                continue
+            neighbor = topic2 if topic1 in start_set else topic1
+            key = (neighbor, row["relation_type"])
+            if key in seen:
+                continue
+            seen.add(key)
+            edges.append(
+                {
+                    "topic_id": neighbor,
+                    "relation_type": row["relation_type"],
+                    "confidence": float(row["confidence"] or 0.0),
+                }
+            )
+        return edges
+
     def merge_topics(self, source_id: str, target_id: str) -> bool:
         source_raw = str(source_id or "")
         source_resolved = self.resolve_topic_id(source_raw)

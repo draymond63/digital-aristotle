@@ -11,12 +11,14 @@ from brains.comms.prompts_session import (
     SESSION_TOPIC_UPDATES_PROMPT,
     TOPIC_GRAPH_CONNECTION_PROMPT,
 )
+from brains.question_planner import QuestionPlanner
 from brains.session import LearningSession
 from brains.session_types import (
     GraphEdgeResponse,
     GraphTopicResponse,
     GraphUpdatesResponse,
     MemoryUpdateResponse,
+    QuestionPlan,
     SessionMemoryExtractionResponse,
     TopicUpdateResponse,
 )
@@ -53,6 +55,7 @@ class FakeAgent:
         self.question_topic_packets = []
         self.topic_connection_packets = []
         self.graph_update_packets = []
+        self.teacher_packets = []
 
     def run_task_json(self, task, conversation, dynamic_prompts=None, packet=None):
         if task.name == "session_summary":
@@ -145,6 +148,7 @@ class FakeAgent:
                 })
             if "http etag" in user_text.lower():
                 return task.output_format.model_validate({
+                    "intent": "explain_mechanism",
                     "topics": [
                         {
                             "topic_id": "http_cache_validation",
@@ -154,7 +158,18 @@ class FakeAgent:
                         }
                     ]
                 })
+            if "confuse" in user_text.lower() or "distinction" in user_text.lower():
+                return task.output_format.model_validate({
+                    "intent": "distinguish",
+                    "topics": [{"topic_id": "covariance", "name": "Covariance", "description": "", "confidence": 0.9}]
+                })
+            if "learn" in user_text.lower():
+                return task.output_format.model_validate({
+                    "intent": "plan_learning",
+                    "topics": [{"topic_id": "covariance", "name": "Covariance", "description": "", "confidence": 0.9}]
+                })
             return task.output_format.model_validate({
+                "intent": "explain_mechanism",
                 "topics": [{"topic_id": "covariance", "name": "Covariance", "description": "", "confidence": 0.9}]
             })
         if task.name == "topic_graph_connection":
@@ -177,6 +192,7 @@ class FakeAgent:
 
     def run_task(self, task, conversation, dynamic_prompts=None, packet=None):
         if task.name == "teacher":
+            self.teacher_packets.append("\n".join(dynamic_prompts or []))
             return "A Kalman filter alternates prediction and correction."
         raise AssertionError(f"Unexpected text task: {task.name}")
 
@@ -324,6 +340,227 @@ def test_question_context_steers_away_from_generic_overview():
             os.chdir(old_cwd)
 
 
+def test_question_plan_is_object_with_knowns_assumptions_and_bottlenecks():
+    with TemporaryDirectory() as dirname:
+        old_cwd = Path.cwd()
+        try:
+            session = make_session(Path(dirname))
+            session.profile.update_topic("linear_algebra", intuition=0.8, details=0.7, confidence=0.8)
+            session.sql_db.upsert_topic("linear_algebra", name="Linear Algebra")
+            session.sql_db.upsert_topic("covariance", name="Covariance")
+            session.sql_db.upsert_topic_edge(
+                "linear_algebra",
+                "covariance",
+                "prerequisite",
+                confidence=0.8,
+                evidence="Linear algebra supports covariance.",
+            )
+
+            plan = session._build_question_plan("what is covariance?")
+
+            assert isinstance(plan, QuestionPlan)
+            assert plan.intent == "explain_mechanism"
+            assert plan.target_topics == ["covariance"]
+            assert plan.knowns[0].topic_id == "linear_algebra"
+            assert plan.assumptions[0].status == "safe_to_assume"
+            assert plan.bottlenecks == []
+            assert "using linear algebra as the anchor" in plan.entry_point
+            assert "causal or operational mechanism" in plan.teaching_move
+            assert "Question plan:" in plan.render()
+            session.sql_db.close()
+        finally:
+            os.chdir(old_cwd)
+
+
+def test_question_planner_marks_weak_connected_profile_topic_as_probe():
+    with TemporaryDirectory() as dirname:
+        old_cwd = Path.cwd()
+        try:
+            session = make_session(Path(dirname))
+            session.profile.update_topic("linear_algebra", intuition=0.2, details=0.2, confidence=0.2)
+            session.sql_db.upsert_topic("linear_algebra", name="Linear Algebra")
+            session.sql_db.upsert_topic("covariance", name="Covariance")
+            session.sql_db.upsert_topic_edge(
+                "linear_algebra",
+                "covariance",
+                "prerequisite",
+                confidence=0.8,
+                evidence="Linear algebra supports covariance.",
+            )
+
+            planner = QuestionPlanner(session.sql_db, session.profile)
+            plan = planner.build(["covariance"], ["linear_algebra"])
+
+            assert isinstance(plan, QuestionPlan)
+            assert plan.knowns[0].topic_id == "linear_algebra"
+            assert plan.assumptions[0].status == "needs_probe"
+            assert plan.needs_probe is True
+            session.sql_db.close()
+        finally:
+            os.chdir(old_cwd)
+
+
+def test_question_plan_marks_neighboring_unknowns_as_probe_bottlenecks():
+    with TemporaryDirectory() as dirname:
+        old_cwd = Path.cwd()
+        try:
+            session = make_session(Path(dirname))
+            session.sql_db.upsert_topic("covariance", name="Covariance")
+            session.sql_db.upsert_topic("random_variable", name="Random Variable")
+            session.sql_db.upsert_topic_edge(
+                "random_variable",
+                "covariance",
+                "prerequisite",
+                confidence=0.8,
+                evidence="Covariance depends on random variables.",
+            )
+
+            plan = session._build_question_plan("what is covariance?")
+
+            assert plan.bottlenecks == ["random_variable"]
+            assert plan.assumptions[0].topic_id == "random_variable"
+            assert plan.assumptions[0].status == "needs_probe"
+            assert plan.needs_probe is True
+            session.sql_db.close()
+        finally:
+            os.chdir(old_cwd)
+
+
+def test_distinguish_intent_downgrades_prerequisite_gaps():
+    with TemporaryDirectory() as dirname:
+        old_cwd = Path.cwd()
+        try:
+            session = make_session(Path(dirname))
+            session.sql_db.upsert_topic("covariance", name="Covariance")
+            session.sql_db.upsert_topic("random_variable", name="Random Variable")
+            session.sql_db.upsert_topic_edge(
+                "random_variable",
+                "covariance",
+                "prerequisite",
+                confidence=0.8,
+                evidence="Covariance depends on random variables.",
+            )
+
+            plan = session._build_question_plan("I confuse covariance with correlation. What is the distinction?")
+
+            assert plan.intent == "distinguish"
+            assert plan.bottlenecks == []
+            assert plan.assumptions[0].topic_id == "random_variable"
+            assert plan.assumptions[0].status == "possible_gap"
+            assert plan.entry_point == "contrast covariance against the concept the learner is mixing it with"
+            assert "contrast the nearby concepts" in plan.teaching_move
+            assert "broad prerequisite review" in plan.avoid
+            session.sql_db.close()
+        finally:
+            os.chdir(old_cwd)
+
+
+def test_plan_learning_intent_keeps_prerequisite_gaps_as_bottlenecks():
+    with TemporaryDirectory() as dirname:
+        old_cwd = Path.cwd()
+        try:
+            session = make_session(Path(dirname))
+            session.sql_db.upsert_topic("covariance", name="Covariance")
+            session.sql_db.upsert_topic("random_variable", name="Random Variable")
+            session.sql_db.upsert_topic_edge(
+                "random_variable",
+                "covariance",
+                "prerequisite",
+                confidence=0.8,
+                evidence="Covariance depends on random variables.",
+            )
+
+            plan = session._build_question_plan("I want to learn covariance")
+
+            assert plan.intent == "plan_learning"
+            assert plan.bottlenecks == ["random_variable"]
+            assert plan.assumptions[0].status == "needs_probe"
+            assert plan.entry_point == "build a short path into covariance, starting with the first prerequisite gap"
+            assert "short learning path" in plan.teaching_move
+            session.sql_db.close()
+        finally:
+            os.chdir(old_cwd)
+
+
+def test_question_planner_keeps_related_unknowns_as_possible_gaps_not_bottlenecks():
+    with TemporaryDirectory() as dirname:
+        old_cwd = Path.cwd()
+        try:
+            session = make_session(Path(dirname))
+            session.sql_db.upsert_topic("covariance", name="Covariance")
+            session.sql_db.upsert_topic("correlation", name="Correlation")
+            session.sql_db.upsert_topic_edge(
+                "correlation",
+                "covariance",
+                "related",
+                confidence=0.8,
+                evidence="Correlation is related to covariance.",
+            )
+
+            plan = session._build_question_plan("what is covariance?")
+
+            assert plan.bottlenecks == []
+            assert plan.assumptions[0].topic_id == "correlation"
+            assert plan.assumptions[0].status == "possible_gap"
+            assert plan.needs_probe is False
+            session.sql_db.close()
+        finally:
+            os.chdir(old_cwd)
+
+
+def test_question_planner_matches_compound_profile_topics_to_neighbor_gaps():
+    with TemporaryDirectory() as dirname:
+        old_cwd = Path.cwd()
+        try:
+            session = make_session(Path(dirname))
+            session.profile.update_topic("standard_error_sampling_distribution", intuition=0.25, details=0.25, confidence=0.25)
+            session.sql_db.upsert_topic("sampling_distribution", name="Sampling Distribution")
+            session.sql_db.upsert_topic("standard_error", name="Standard Error")
+            session.sql_db.upsert_topic_edge(
+                "sampling_distribution",
+                "standard_error",
+                "prerequisite",
+                confidence=0.8,
+                evidence="Sampling distributions support standard error.",
+            )
+
+            planner = QuestionPlanner(session.sql_db, session.profile)
+            plan = planner.build(["sampling_distribution"], ["standard_error_sampling_distribution"])
+
+            assert "standard_error" not in plan.bottlenecks
+            assert any(item.topic_id == "standard_error_sampling_distribution" for item in plan.knowns)
+            assert all(item.topic_id != "standard_error" for item in plan.assumptions)
+            session.sql_db.close()
+        finally:
+            os.chdir(old_cwd)
+
+
+def test_question_planner_uses_target_anchor_without_self_connection_wording():
+    with TemporaryDirectory() as dirname:
+        old_cwd = Path.cwd()
+        try:
+            session = make_session(Path(dirname))
+            session.profile.update_topic("covariance", intuition=0.6, details=0.5, confidence=0.6)
+            session.profile.update_topic("correlation", intuition=0.8, details=0.8, confidence=0.8)
+            session.sql_db.upsert_topic("covariance", name="Covariance")
+            session.sql_db.upsert_topic("correlation", name="Correlation")
+            session.sql_db.upsert_topic_edge(
+                "correlation",
+                "covariance",
+                "related",
+                confidence=0.8,
+                evidence="Correlation is related to covariance.",
+            )
+
+            plan = session._build_question_plan("what is covariance?")
+
+            assert plan.entry_point == "explain why covariance works, using correlation as the anchor"
+            assert "connect it to covariance" not in plan.entry_point
+            session.sql_db.close()
+        finally:
+            os.chdir(old_cwd)
+
+
 def test_question_memory_query_uses_graph_connected_profile_topics():
     with TemporaryDirectory() as dirname:
         old_cwd = Path.cwd()
@@ -344,6 +581,9 @@ def test_question_memory_query_uses_graph_connected_profile_topics():
             assert "Why does the widest direction preserve information?" in insight_query
             assert "pca eigenvectors variance" in insight_query
             assert any("Related learner topic: pca eigenvectors variance" in item for item in insight_query)
+            assert session.agent.teacher_packets
+            assert "Question plan:" in session.agent.teacher_packets[-1]
+            assert "pca eigenvectors variance" in session.agent.teacher_packets[-1]
             assert session.agent.question_topic_packets
             assert session.agent.topic_connection_packets
             assert session.sql_db.connected_targets(
@@ -846,6 +1086,14 @@ if __name__ == "__main__":
     test_question_session_lifecycle_and_finalization()
     test_bare_message_starts_question_session()
     test_question_context_steers_away_from_generic_overview()
+    test_question_plan_is_object_with_knowns_assumptions_and_bottlenecks()
+    test_question_planner_marks_weak_connected_profile_topic_as_probe()
+    test_question_plan_marks_neighboring_unknowns_as_probe_bottlenecks()
+    test_distinguish_intent_downgrades_prerequisite_gaps()
+    test_plan_learning_intent_keeps_prerequisite_gaps_as_bottlenecks()
+    test_question_planner_keeps_related_unknowns_as_possible_gaps_not_bottlenecks()
+    test_question_planner_matches_compound_profile_topics_to_neighbor_gaps()
+    test_question_planner_uses_target_anchor_without_self_connection_wording()
     test_question_memory_query_uses_graph_connected_profile_topics()
     test_unrelated_question_does_not_use_profile_topic_memory_hint()
     test_previous_asks_are_deduped_and_exclude_current_question()

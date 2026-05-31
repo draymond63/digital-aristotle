@@ -10,6 +10,86 @@ from brains.data.db_vector import MemoryKind
 
 
 SessionMode = Literal["idle", "question"]
+QUESTION_INTENTS = {
+    "explain_mechanism",
+    "distinguish",
+    "apply",
+    "debug_model",
+    "plan_learning",
+}
+
+
+@dataclass(frozen=True)
+class LearnerTopicKnown:
+    topic_id: str
+    intuition: float
+    details: float
+    confidence: float
+
+    def render(self) -> str:
+        readable = self.topic_id.replace("_", " ")
+        return (
+            f"{readable}: intuition {self.intuition:.2f}, "
+            f"details {self.details:.2f}, confidence {self.confidence:.2f}"
+        )
+
+
+@dataclass(frozen=True)
+class LearnerTopicAssumption:
+    topic_id: str
+    status: str
+    reason: str
+    confidence: float
+
+    def render(self) -> str:
+        readable = self.topic_id.replace("_", " ")
+        return f"{readable}: {self.status} ({self.confidence:.2f}) - {self.reason}"
+
+
+@dataclass(frozen=True)
+class QuestionPlan:
+    intent: str = "explain_mechanism"
+    target_topics: list[str] = field(default_factory=list)
+    knowns: list[LearnerTopicKnown] = field(default_factory=list)
+    assumptions: list[LearnerTopicAssumption] = field(default_factory=list)
+    bottlenecks: list[str] = field(default_factory=list)
+    entry_point: str = ""
+    teaching_move: str = ""
+    avoid: str = ""
+    memory_topic_hints: list[str] = field(default_factory=list)
+
+    @property
+    def needs_probe(self) -> bool:
+        return any(item.status == "needs_probe" for item in self.assumptions)
+
+    def render(self) -> str:
+        lines = ["Question plan:"]
+        lines.append(f"Intent: {self.intent}")
+        lines.append(f"Target topics: {self._render_topics(self.target_topics)}")
+        lines.append("Known learner anchors:")
+        lines.extend(self._render_items(item.render() for item in self.knowns))
+        lines.append("Temporary assumptions:")
+        lines.extend(self._render_items(item.render() for item in self.assumptions))
+        lines.append(f"Likely bottlenecks: {self._render_topics(self.bottlenecks)}")
+        lines.append(f"Recommended entry point: {self.entry_point or 'answer from the learner question directly'}")
+        if self.teaching_move:
+            lines.append(f"Teaching move: {self.teaching_move}")
+        if self.avoid:
+            lines.append(f"Avoid: {self.avoid}")
+        if self.needs_probe:
+            lines.append("Probe guidance: briefly surface the uncertain assumption before committing to a deep path.")
+        return "\n".join(lines)
+
+    @staticmethod
+    def _render_topics(topics: list[str]) -> str:
+        if not topics:
+            return "none"
+        return ", ".join(topic.replace("_", " ") for topic in topics)
+
+    @staticmethod
+    def _render_items(items) -> list[str]:
+        rendered = [item for item in items if item]
+        return [f"- {item}" for item in rendered] if rendered else ["- none"]
 
 
 class TopicUpdateResponse(ResponseObject):
@@ -193,7 +273,15 @@ class QuestionTopicResponse(ResponseObject):
 
 
 class QuestionTopicResolutionResponse(ResponseObject):
+    intent: str = "explain_mechanism"
     topics: list[QuestionTopicResponse] = Field(default_factory=list)
+
+    @field_validator("intent", mode="before")
+    @classmethod
+    def normalize_intent(cls, value):
+        intent = "" if value is None else str(value).strip().lower()
+        intent = intent.replace("-", "_").replace(" ", "_")
+        return intent if intent in QUESTION_INTENTS else "explain_mechanism"
 
 
 class TopicConnectionResponse(ResponseObject):

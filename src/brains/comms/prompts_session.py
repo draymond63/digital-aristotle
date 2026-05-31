@@ -180,6 +180,7 @@ Input:
 Return strict JSON only:
 
 {
+  "intent": "explain_mechanism | distinguish | apply | debug_model | plan_learning",
   "topics": [
     {
       "topic_id": "canonical_topic_id",
@@ -192,6 +193,12 @@ Return strict JSON only:
 
 Rules:
 - Return 1 to 3 topics.
+- Choose one intent that describes the teaching move the learner needs:
+  - explain_mechanism: explain why or how something works.
+  - distinguish: separate nearby concepts the learner is confusing.
+  - apply: use an abstract idea in a concrete case.
+  - debug_model: repair a learner's partial mental model.
+  - plan_learning: build a broader path or sequence.
 - Prefer existing topic IDs from the known topic graph candidates only when they match the same concept in the same domain.
 - If no existing candidate matches the same concept and domain, create a new precise topic_id.
 - Do not reuse an existing topic because it shares generic words with the question.
